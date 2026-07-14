@@ -59,6 +59,10 @@
                 <p class="text-sm text-gray-500 mt-0.5">Monitor and manage Docker container updates</p>
             </div>
             <div class="flex items-center gap-3">
+                <button id="self-update-btn" onclick="selfUpdate()" class="hidden bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+                    <span>&#8635;</span>
+                    <span id="self-update-text">Update Dockyard</span>
+                </button>
                 <button hx-post="/api/check" hx-swap="none" hx-on::after-request="refreshContainers()" class="bg-dock-600 hover:bg-dock-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
                     <span class="htmx-indicator animate-spin">&#8635;</span>
                     <span>Check Now</span>
@@ -317,9 +321,45 @@
             refreshContainers(true);
         });
 
+        eventSource.addEventListener('update_failed', function(e) {
+            var btn = document.getElementById('self-update-btn');
+            btn.disabled = false;
+            document.getElementById('self-update-text').textContent = 'Update Failed - Retry';
+        });
+
         // Initial load + silent background refresh every 30s
         refreshContainers(true);
         setInterval(function() { refreshContainers(false); }, 30000);
+
+        // Check for Dockyard self-updates on load
+        checkForSelfUpdate();
+
+        function checkForSelfUpdate() {
+            fetch('/api/update/check')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.available) {
+                        var btn = document.getElementById('self-update-btn');
+                        btn.classList.remove('hidden');
+                        document.getElementById('self-update-text').textContent = 'Update to ' + escapeHtml(data.latest_version);
+                        btn.title = data.body ? data.body.substring(0, 200) : 'Update available';
+                    }
+                })
+                .catch(() => {});
+        }
+
+        function selfUpdate() {
+            if (!confirm('Update Dockyard to the latest version? The container will restart automatically.')) return;
+            var btn = document.getElementById('self-update-btn');
+            btn.disabled = true;
+            document.getElementById('self-update-text').textContent = 'Updating...';
+            fetch('/api/update/self', { method: 'POST' })
+                .then(r => r.json())
+                .then(() => {
+                    showLog();
+                })
+                .catch(() => {});
+        }
     </script>
 </body>
 </html>

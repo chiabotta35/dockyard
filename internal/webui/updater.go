@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -17,8 +18,8 @@ import (
 )
 
 const (
-	GitHubOwner = "dockyard"
-	GitHubRepo  = "dockyard"
+	GitHubOwner = "chiabotta35"
+	GitHubRepo  = "Dockyard"
 )
 
 type UpdateInfo struct {
@@ -93,6 +94,9 @@ func CheckForUpdate(currentVersion string) (*UpdateInfo, error) {
 	return info, nil
 }
 
+// PerformSelfUpdate updates Dockyard. When running in Docker, it pulls the new
+// image and restarts the container. When running as a bare binary, it replaces
+// the executable on disk and tells the user to restart manually.
 func PerformSelfUpdate(currentVersion string, events *EventHub) error {
 	info, err := CheckForUpdate(currentVersion)
 	if err != nil {
@@ -108,6 +112,89 @@ func PerformSelfUpdate(currentVersion string, events *EventHub) error {
 		Message: fmt.Sprintf("Updating Dockyard from %s to %s...", currentVersion, info.LatestVer),
 	})
 
+	if isRunningInDocker() {
+		return performDockerSelfUpdate(info, events)
+	}
+
+	return performBinarySelfUpdate(info, events)
+}
+
+// isRunningInDocker detects whether the process is inside a Docker container.
+func isRunningInDocker() bool {
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	data, err := os.ReadFile("/proc/1/cgroup")
+	if err == nil && strings.Contains(string(data), "docker") {
+		return true
+	}
+	return false
+}
+
+// performDockerSelfUpdate pulls the new Docker image and restarts the container
+// by stopping it — Docker's restart policy (unless-stopped/always) will bring
+// it back up with the new image.
+func performDockerSelfUpdate(info *UpdateInfo, events *EventHub) error {
+	imageRef := fmt.Sprintf("ghcr.io/%s/%s:%s", GitHubOwner, GitHubRepo, info.LatestVer)
+	events.BroadcastLog("", "Pulling new image: "+imageRef)
+
+	events.BroadcastLog("", "Pulling image (this may take a moment)...")
+	if err := exec.Command("docker", "pull", imageRef).Run(); err != nil {
+		events.Broadcast(Event{Type: EventUpdateFailed, Message: "Failed to pull new Docker image: " + err.Error()})
+		return fmt.Errorf("docker pull failed: %w", err)
+	}
+
+	events.BroadcastLog("", "Image pulled successfully")
+
+	// Find our own container ID
+	containerID, err := getSelfContainerID()
+	if err != nil {
+		events.Broadcast(Event{Type: EventUpdateFailed, Message: "Failed to identify container: " + err.Error()})
+		return fmt.Errorf("failed to get container ID: %w", err)
+	}
+
+	events.BroadcastLog("", "Restarting container: "+containerID[:12])
+
+	// Stop the container — Docker's restart policy will bring it back with the new image
+	if err := exec.Command("docker", "restart", containerID).Run(); err != nil {
+		events.Broadcast(Event{Type: EventUpdateFailed, Message: "Failed to restart container: " + err.Error()})
+		return fmt.Errorf("docker restart failed: %w", err)
+	}
+
+	events.Broadcast(Event{
+		Type:    EventUpdateComplete,
+		Message: fmt.Sprintf("Updated to %s successfully! Container is restarting with the new image.", info.LatestVer),
+	})
+
+	return nil
+}
+
+// getSelfContainerID reads the container ID from the cgroup or hostname.
+func getSelfContainerID() (string, error) {
+	// Try /proc/self/cgroup first
+	data, err := os.ReadFile("/proc/self/cgroup")
+	if err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			// Docker cgroup v2: "0::/docker/abc123..."
+			// Docker cgroup v1: "12:cpu:/docker/abc123..."
+			if idx := strings.LastIndex(line, "/docker/"); idx != -1 {
+				id := strings.TrimSpace(line[idx+len("/docker/"):])
+				if len(id) > 0 {
+					return id, nil
+				}
+			}
+		}
+	}
+
+	// Fallback: use hostname (Docker sets it to container ID)
+	hostname, err := os.Hostname()
+	if err == nil && len(hostname) >= 12 {
+		return hostname, nil
+	}
+
+	return "", fmt.Errorf("could not determine container ID")
+}
+func performBinarySelfUpdate(info *UpdateInfo, events *EventHub) error {
 	newTag := strings.TrimPrefix(info.LatestVer, "v")
 	arch := runtime.GOARCH
 
