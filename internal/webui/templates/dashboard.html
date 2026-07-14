@@ -274,6 +274,9 @@
             var rollbackBtn = null;
             existingBtns.forEach(function(b) { if (b.textContent === 'Rollback') rollbackBtn = b; });
             var newBtns = '';
+            if (mode !== 'ignore' && !isSelf) {
+                newBtns += '<button onclick="event.stopPropagation(); checkSingle(\'' + name + '\')" id="check-btn-' + name + '" class="bg-gray-700 hover:bg-gray-600 text-white px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" title="Check for updates">Check</button>';
+            }
             if (stale) {
                 if (isSelf) {
                     newBtns += '<button onclick="event.stopPropagation(); triggerUpdate(\'' + name + '\')" class="bg-dock-600 hover:bg-dock-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors" title="Updates Dockyard itself">Update Dockyard</button>';

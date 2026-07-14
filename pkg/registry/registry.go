@@ -2,8 +2,6 @@ package registry
 
 import (
 	"context"
-	"errors"
-	"fmt"
 
 	"github.com/distribution/reference"
 	"github.com/sirupsen/logrus"
@@ -12,12 +10,6 @@ import (
 
 	"github.com/dockyard/dockyard/pkg/registry/auth"
 	"github.com/dockyard/dockyard/pkg/types"
-)
-
-// Errors for registry operations.
-var (
-	// errFailedGetAuth indicates a failure to retrieve authentication credentials for an image.
-	errFailedGetAuth = errors.New("failed to get authentication credentials")
 )
 
 // GetPullOptions creates a struct with all options needed for pulling images from a registry.
@@ -41,9 +33,10 @@ func GetPullOptions(imageName string) (dockerClient.ImagePullOptions, error) {
 	// Fetch encoded registry credentials for the image.
 	registryCredentials, err := EncodedAuth(imageName)
 	if err != nil {
-		logrus.WithError(err).WithFields(fields).Debug("Failed to get authentication credentials")
+		logrus.WithError(err).WithFields(fields).
+			Debug("Could not load registry credentials, proceeding without auth")
 
-		return dockerClient.ImagePullOptions{}, fmt.Errorf("%w: %w", errFailedGetAuth, err)
+		return dockerClient.ImagePullOptions{}, nil
 	}
 
 	// Return empty options if no auth is available.
