@@ -518,28 +518,55 @@ func (s *Server) handleAPICheckNow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := context.Background()
+
+	// Fetch Docker containers once (avoid O(n^2) re-listing).
+	dockerContainers, err := s.client.ListContainers(ctx)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to list Docker containers for staleness check")
+		s.writeError(w, "failed to list Docker containers: "+err.Error(), 500)
+		return
+	}
+
+	// Index Docker containers by name for O(1) lookup.
+	dockerByName := make(map[string]types.Container, len(dockerContainers))
+	for _, dc := range dockerContainers {
+		dockerByName[dc.Name()] = dc
+	}
+
 	stale := 0
+	failed := 0
+	upToDate := 0
 	for i := range containers {
 		if i >= limit {
 			break
 		}
-		allContainers, err := s.client.ListContainers(ctx)
-		if err != nil {
+		dc, ok := dockerByName[containers[i].Name]
+		if !ok {
+			containers[i].CheckError = "container not found in Docker"
+			failed++
+			s.events.BroadcastLog(containers[i].Name, "Check failed: container not found in Docker")
 			continue
 		}
-		for _, c := range allContainers {
-			if c.Name() == containers[i].Name {
-				isStale, _, err := s.client.IsContainerStale(ctx, c, types.UpdateParams{})
-				if err == nil && isStale {
-					containers[i].Stale = true
-					stale++
-				}
-				break
-			}
+
+		isStale, _, err := s.client.IsContainerStale(ctx, dc, types.UpdateParams{})
+		if err != nil {
+			errMsg := err.Error()
+			containers[i].CheckError = errMsg
+			failed++
+			s.events.BroadcastLog(containers[i].Name, "Check failed: "+errMsg)
+			logrus.WithError(err).WithField("container", containers[i].Name).Warn("Staleness check failed")
+			continue
+		}
+		if isStale {
+			containers[i].Stale = true
+			stale++
+			s.events.BroadcastLog(containers[i].Name, "Update available")
+		} else {
+			upToDate++
 		}
 	}
 
-	msg := fmt.Sprintf("Scan complete: %d containers checked, %d updates available", len(containers), stale)
+	msg := fmt.Sprintf("Scan complete: %d checked, %d updates, %d up to date, %d failed", len(containers), stale, upToDate, failed)
 	s.events.Broadcast(Event{Type: EventScanComplete, Message: msg})
 	s.events.BroadcastLog("", msg)
 
@@ -621,10 +648,32 @@ func (s *Server) handleAPITestNotification(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	notifyURL := settings.NotificationURL
+
+	// Auto-convert Discord webhook URLs to shoutrrr format.
+	// Input: https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN
+	// Output: discord://WEBHOOK_TOKEN@WEBHOOK_ID
+	if strings.Contains(notifyURL, "discord.com/api/webhooks/") || strings.Contains(notifyURL, "discordapp.com/api/webhooks/") {
+		trimmedURL := strings.TrimRight(notifyURL, "/")
+		trimmedURL = strings.TrimPrefix(trimmedURL, "https://")
+		trimmedURL = strings.TrimPrefix(trimmedURL, "http://")
+		parts := strings.Split(trimmedURL, "/")
+		// Expected: [discord.com, api, webhooks, WEBHOOK_ID, WEBHOOK_TOKEN]
+		if len(parts) >= 5 {
+			webhookID := parts[len(parts)-2]
+			token := parts[len(parts)-1]
+			notifyURL = fmt.Sprintf("discord://%s@%s", token, webhookID)
+			logrus.WithFields(logrus.Fields{
+				"original":  settings.NotificationURL,
+				"converted": notifyURL,
+			}).Debug("Auto-converted Discord webhook URL to shoutrrr format")
+		}
+	}
+
 	msg := fmt.Sprintf("Dockyard test notification\nVersion: %s\nTime: %s",
 		s.version, time.Now().Format("2006-01-02 15:04:05"))
 
-	if err := shoutrrr.Send(settings.NotificationURL, msg); err != nil {
+	if err := shoutrrr.Send(notifyURL, msg); err != nil {
 		logrus.WithError(err).Error("Test notification failed")
 		s.writeError(w, "failed to send: "+err.Error(), 500)
 		return

@@ -56,6 +56,7 @@ type ContainerInfo struct {
 	HasPreviousImage bool              `json:"has_previous_image"`
 	PreviousImage    string            `json:"previous_image,omitempty"`
 	IsSelf           bool              `json:"is_self"`
+	CheckError       string            `json:"check_error,omitempty"`
 }
 
 func NewServer(state *State, events *EventHub, auth *AuthStore, client container.Client, filter types.Filter, addr, version string) *Server {

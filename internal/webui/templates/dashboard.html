@@ -63,7 +63,7 @@
             </div>
         </div>
 
-        <div class="grid grid-cols-4 gap-4 mb-6">
+        <div class="grid grid-cols-5 gap-4 mb-6">
             <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
                 <div class="text-sm text-gray-500">Total</div>
                 <div class="text-2xl font-bold mt-1" id="stat-total">-</div>
@@ -80,6 +80,10 @@
                 <div class="text-sm text-gray-500">Deferred</div>
                 <div class="text-2xl font-bold mt-1 text-purple-400" id="stat-deferred">-</div>
             </div>
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <div class="text-sm text-gray-500">Failed</div>
+                <div class="text-2xl font-bold mt-1 text-red-400" id="stat-failed">-</div>
+            </div>
         </div>
 
         <div class="flex items-center gap-1 mb-4 border-b border-gray-800 pb-px" id="filter-tabs">
@@ -88,6 +92,8 @@
             <button class="filter-tab px-3 py-1.5 text-sm rounded-t-md border-b-2 transition-colors text-gray-500 border-transparent hover:text-gray-300" data-filter="auto" onclick="setFilter('auto', this)">Auto</button>
             <button class="filter-tab px-3 py-1.5 text-sm rounded-t-md border-b-2 transition-colors text-gray-500 border-transparent hover:text-gray-300" data-filter="deferred" onclick="setFilter('deferred', this)">Deferred</button>
         </div>
+
+        <div id="scan-banner" class="hidden mb-4 px-4 py-3 rounded-xl text-sm font-medium border"></div>
 
         <div id="container-grid" class="space-y-2">
             <div class="text-center py-12 text-gray-500">
@@ -125,18 +131,17 @@
             return containers;
         }
 
-        function updateStats() {
-            document.getElementById('stat-total').textContent = containers.length;
-            document.getElementById('stat-updates').textContent = containers.filter(function(c) { return c.stale; }).length;
-            document.getElementById('stat-auto').textContent = containers.filter(function(c) { return c.update_mode === 'auto'; }).length;
-            document.getElementById('stat-deferred').textContent = containers.filter(function(c) { return c.is_deferred; }).length;
-        }
-
         function buildCard(c) {
             var n = esc(c.name);
             var isExpanded = expanded[c.name];
             var statusDot = c.stale ? 'bg-amber-400 status-pulse' : (c.state === 'running' ? 'bg-emerald-400' : 'bg-red-400');
             var stateBadge = c.state === 'running' ? '<span class="text-xs text-emerald-400">&#9679; running</span>' : '<span class="text-xs text-red-400">&#9679; stopped</span>';
+            var checkErrBadge = c.check_error ? '<span class="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full ml-1" title="' + esc(c.check_error) + '">Check failed</span>' : '';
+            if (c.check_error) {
+                statusDot = 'bg-red-400';
+            } else if (!c.stale && !c.check_error && c.state === 'running') {
+                statusDot = 'bg-emerald-400';
+            }
             var modeIcon = c.update_mode === 'auto' ? '&#9889;' : (c.update_mode === 'ignore' ? '&#128683;' : '&#9998;');
             var modeColor = c.update_mode === 'auto' ? 'text-emerald-400' : (c.update_mode === 'ignore' ? 'text-red-400' : 'text-amber-400');
             var modeLabel = c.update_mode === 'auto' ? 'Auto' : (c.update_mode === 'ignore' ? 'Ignore' : 'Manual');
@@ -167,7 +172,7 @@
                 + '<div class="w-2.5 h-2.5 rounded-full ' + statusDot + '"></div>'
                 + '<h3 class="font-semibold text-white truncate">' + n + '</h3>'
                 + (c.is_self ? '<span class="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full">Self</span>' : '')
-                + stackBadge + deferBadge + logBadge
+                + checkErrBadge + stackBadge + deferBadge + logBadge
                 + '</div>'
                 + '<p class="text-xs text-gray-500 font-mono truncate ml-7 mb-1">' + esc(c.image) + '</p>'
                 + '<div class="flex items-center gap-3 text-xs text-gray-500 ml-7">'
@@ -191,6 +196,7 @@
                 + (c.compose_stack ? '<div><div class="text-xs text-gray-500">Stack</div><div class="text-sm text-gray-300">' + esc(c.compose_stack) + '</div></div>' : '')
                 + (c.ports ? '<div><div class="text-xs text-gray-500">Ports</div><div class="text-sm font-mono text-gray-300">' + esc(c.ports) + '</div></div>' : '')
                 + (c.is_deferred ? '<div><div class="text-xs text-gray-500">Deferred Until</div><div class="text-sm text-purple-400">' + esc(c.defer_until) + '</div></div>' : '')
+                + (c.check_error ? '<div class="col-span-2 bg-red-500/10 border border-red-500/30 rounded-lg p-2"><div class="text-xs text-red-400">Staleness check failed</div><div class="text-xs text-gray-400 mt-1 font-mono">' + esc(c.check_error) + '</div></div>' : '')
                 + (c.has_previous_image ? '<div class="col-span-2"><div class="text-xs text-gray-500">Previous Image</div><div class="text-sm font-mono text-amber-400">' + esc(c.previous_image) + '</div></div>' : '')
                 + (c.is_self ? '<div class="col-span-2 bg-blue-500/10 border border-blue-500/30 rounded-lg p-2"><div class="text-xs text-blue-400">This is Dockyard. Updating starts a replacement first, then stops this one.</div></div>' : '')
                 + '</div>'
@@ -246,12 +252,12 @@
 
         // --- Surgical updates: never re-render the full list ---
 
-        function updateCardStatus(name, stale, state) {
+        function updateCardStatus(name, stale, state, checkError) {
             var card = document.getElementById('card-' + name);
             if (!card) return;
             var dot = card.querySelector('.rounded-full');
             if (dot) {
-                dot.className = 'w-2.5 h-2.5 rounded-full ' + (stale ? 'bg-amber-400 status-pulse' : (state === 'running' ? 'bg-emerald-400' : 'bg-red-400'));
+                dot.className = 'w-2.5 h-2.5 rounded-full ' + (checkError ? 'bg-red-400' : (stale ? 'bg-amber-400 status-pulse' : (state === 'running' ? 'bg-emerald-400' : 'bg-red-400')));
             }
         }
 
@@ -282,6 +288,7 @@
             document.getElementById('stat-updates').textContent = containers.filter(function(c) { return c.stale; }).length;
             document.getElementById('stat-auto').textContent = containers.filter(function(c) { return c.update_mode === 'auto'; }).length;
             document.getElementById('stat-deferred').textContent = containers.filter(function(c) { return c.is_deferred; }).length;
+            document.getElementById('stat-failed').textContent = containers.filter(function(c) { return c.check_error; }).length;
         }
 
         // --- Public functions (called from onclick) ---
@@ -368,6 +375,8 @@
         window.checkAll = function() {
             document.getElementById('check-btn').disabled = true;
             document.getElementById('check-spinner').classList.remove('hidden');
+            var banner = document.getElementById('scan-banner');
+            banner.classList.add('hidden');
             fetch('/api/check', { method: 'POST' })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
@@ -376,6 +385,23 @@
                     containers = data;
                     renderList();
                     autoUpdateStale();
+                    // Show scan summary banner
+                    var total = data.length;
+                    var updates = data.filter(function(c) { return c.stale; }).length;
+                    var errors = data.filter(function(c) { return c.check_error; }).length;
+                    var upToDate = total - updates - errors;
+                    if (errors > 0) {
+                        banner.className = 'mb-4 px-4 py-3 rounded-xl text-sm font-medium border bg-red-500/10 border-red-500/30 text-red-400';
+                        banner.textContent = errors + ' container' + (errors > 1 ? 's' : '') + ' failed to check. ' + updates + ' update' + (updates !== 1 ? 's' : '') + ' available. ' + upToDate + ' up to date.';
+                    } else if (updates > 0) {
+                        banner.className = 'mb-4 px-4 py-3 rounded-xl text-sm font-medium border bg-amber-500/10 border-amber-500/30 text-amber-400';
+                        banner.textContent = updates + ' update' + (updates !== 1 ? 's' : '') + ' available. ' + upToDate + ' container' + (upToDate !== 1 ? 's' : '') + ' up to date.';
+                    } else {
+                        banner.className = 'mb-4 px-4 py-3 rounded-xl text-sm font-medium border bg-emerald-500/10 border-emerald-500/30 text-emerald-400';
+                        banner.textContent = 'All ' + total + ' container' + (total !== 1 ? 's' : '') + ' up to date. No updates available.';
+                    }
+                    banner.classList.remove('hidden');
+                    setTimeout(function() { banner.classList.add('hidden'); }, 30000);
                 })
                 .catch(function() {
                     document.getElementById('check-btn').disabled = false;
@@ -421,7 +447,7 @@
         }
 
         function dataHash(data) {
-            return JSON.stringify(data.map(function(c) { return [c.name, c.stale, c.state, c.update_mode, c.is_deferred]; }));
+            return JSON.stringify(data.map(function(c) { return [c.name, c.stale, c.state, c.update_mode, c.is_deferred, c.check_error]; }));
         }
 
         var lastHash = '';
@@ -472,7 +498,7 @@
                 containers = data;
                 var c = containers.find(function(x) { return x.name === name; });
                 if (c) {
-                    updateCardStatus(name, c.stale, c.state);
+                    updateCardStatus(name, c.stale, c.state, c.check_error);
                     updateCardButtons(name, c.stale, c.is_self, c.update_mode);
                 }
                 updateStats();
@@ -489,6 +515,7 @@
         eventSource.addEventListener('scan_started', function(e) {
             document.getElementById('check-btn').disabled = true;
             document.getElementById('check-spinner').classList.remove('hidden');
+            document.getElementById('scan-banner').classList.add('hidden');
         });
 
         eventSource.addEventListener('scan_complete', function(e) {
