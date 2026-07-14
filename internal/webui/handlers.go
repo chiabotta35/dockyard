@@ -557,14 +557,14 @@ func (s *Server) handleAPICheckNow(w http.ResponseWriter, r *http.Request) {
 		dockerByName[dc.Name()] = dc
 	}
 
-	// Check containers in parallel (max 5 concurrent to avoid Docker API hammering).
+	// Check containers in parallel (max 10 concurrent for faster scans).
 	type result struct {
 		index int
 		stale bool
 		err   string
 	}
 	results := make(chan result, limit)
-	sem := make(chan struct{}, 5)
+	sem := make(chan struct{}, 10)
 	var wg sync.WaitGroup
 
 	toCheck := len(containers)
@@ -642,30 +642,42 @@ func (s *Server) sendCheckNotification(updates, errors, upToDate, total int, det
 		return
 	}
 
+	now := time.Now().UTC().Format("2006-01-02 15:04 UTC")
 	var msgParts []string
 
-	// List containers needing updates with image details.
+	// Header
+	header := fmt.Sprintf("Dockyard Scan \u2014 %s", now)
+	msgParts = append(msgParts, header)
+	msgParts = append(msgParts, fmt.Sprintf("%d/%d checked \u2022 %d up to date", total, total, upToDate))
+	msgParts = append(msgParts, "")
+
+	// Containers needing updates with details.
 	if updates > 0 {
-		msgParts = append(msgParts, fmt.Sprintf("**%d update(s) available:**", updates))
+		msgParts = append(msgParts, fmt.Sprintf("\u2B50 **%d update(s) available:**", updates))
 		for _, d := range details {
 			if d.stale {
-				msgParts = append(msgParts, fmt.Sprintf("  \u2022 **%s** — `%s`", d.name, d.image))
+				msgParts = append(msgParts, fmt.Sprintf("  \u2022 **%s**", d.name))
+				msgParts = append(msgParts, fmt.Sprintf("    Image: `%s`", d.image))
 			}
 		}
+		msgParts = append(msgParts, "")
+		msgParts = append(msgParts, "Manage updates: open Dockyard dashboard")
+		msgParts = append(msgParts, "")
 	}
 
-	// List containers with check errors.
+	// Containers with check errors.
 	if errors > 0 {
-		msgParts = append(msgParts, fmt.Sprintf("**%d check error(s):**", errors))
+		msgParts = append(msgParts, fmt.Sprintf("\u274C **%d check error(s):**", errors))
 		for _, d := range details {
 			if d.errMsg != "" {
-				msgParts = append(msgParts, fmt.Sprintf("  \u2022 **%s** — %s", d.name, d.errMsg))
+				msgParts = append(msgParts, fmt.Sprintf("  \u2022 **%s** (`%s`)", d.name, d.image))
+				msgParts = append(msgParts, fmt.Sprintf("    Error: %s", d.errMsg))
 			}
 		}
+		msgParts = append(msgParts, "")
 	}
 
-	msgParts = append(msgParts, fmt.Sprintf("\n%d/%d containers checked, %d up to date. Dockyard v%s",
-		total, total, upToDate, s.version))
+	msgParts = append(msgParts, fmt.Sprintf("Dockyard v%s", s.version))
 
 	msg := strings.Join(msgParts, "\n")
 
@@ -736,7 +748,7 @@ func (s *Server) runAutoCheck(ctx context.Context) {
 		err   string
 	}
 	results := make(chan result, len(containers))
-	sem := make(chan struct{}, 5)
+	sem := make(chan struct{}, 10)
 	var wg sync.WaitGroup
 
 	for i := range containers {

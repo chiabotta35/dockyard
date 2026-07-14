@@ -131,7 +131,7 @@
         var DB_IMAGES = /^(mysql|mariadb|postgres(?:ql)?|mongo(?:db)?|redis|memcached|influxdb|timescaledb|cockroach(?:db)?|cassandra|elasticsearch|opensearch|clickhouse|neo4j|couchdb|valkey|keydb|scylladb|mssql|percona|tidb|planetscale|dragonflydb|ferretdb)/i;
 
         // Sidecar image patterns — companion containers that shouldn't be checked independently
-        var SIDECAR_IMAGES = /^(apache\/tika|gotenberg|tika|gotenberg\/gotenberg|pdfjs|libreoffice|chromium|wkhtmltopdf|collabora|onlyoffice-documentserver|embedder)/i;
+        var SIDECAR_IMAGES = /tika|gotenberg|pdfjs|libreoffice|chromium|wkhtmltopdf|collabora|onlyoffice|embedder|exiftool|ghostscript|imgproxy|pdfcpu|qpdf|poppler|pandoc/i;
 
         function isDatabase(c) {
             if (!c.image) return false;
@@ -217,7 +217,7 @@
             var logCount = (containerLogs[c.name] || []).length;
             var logBadge = logCount > 0 ? '<span class="text-xs text-gray-600 ml-2">' + logCount + '</span>' : '';
 
-            var html = '<div id="card-' + n + '" class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">'
+            var html = '<div id="card-' + n + '" class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden' + (c.stale ? ' border-l-2 border-l-amber-400' : (c.check_error ? ' border-l-2 border-l-red-400' : '')) + '">'
                 + '<div class="p-4 cursor-pointer hover:bg-gray-900/50 transition-colors" onclick="toggleDetail(\'' + n + '\')">'
                 + '<div class="flex items-start justify-between">'
                 + '<div class="flex-1 min-w-0">'
@@ -226,6 +226,7 @@
                 + '<div class="w-2.5 h-2.5 rounded-full ' + statusDot + '"></div>'
                 + '<h3 class="font-semibold text-white truncate">' + n + '</h3>'
                 + (c.is_self ? '<span class="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full">Self</span>' : '')
+                + (c.stale ? '<span class="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-medium">Update available</span>' : '')
                 + checkErrBadge + stackBadge + deferBadge + logBadge
                 + '</div>'
                 + '<p class="text-xs text-gray-500 font-mono truncate ml-7 mb-1">' + esc(c.image) + '</p>'
@@ -329,9 +330,28 @@
         function updateCardStatus(name, stale, state, checkError) {
             var card = document.getElementById('card-' + name);
             if (!card) return;
-            var dot = card.querySelector('.rounded-full');
+            // Update status dot
+            var dot = card.querySelector('.rounded-full:not([id])');
             if (dot) {
                 dot.className = 'w-2.5 h-2.5 rounded-full ' + (checkError ? 'bg-red-400' : (stale ? 'bg-amber-400 status-pulse' : (state === 'running' ? 'bg-emerald-400' : 'bg-red-400')));
+            }
+            // Update left border
+            card.className = 'bg-gray-900 border border-gray-800 rounded-xl overflow-hidden' + (stale ? ' border-l-2 border-l-amber-400' : (checkError ? ' border-l-2 border-l-red-400' : ''));
+            // Update or add "Update available" badge
+            var badgeContainer = card.querySelector('.flex.items-center.gap-2.mb-1');
+            if (badgeContainer) {
+                var existingBadge = badgeContainer.querySelector('.bg-amber-500\\/20');
+                if (stale && !existingBadge) {
+                    var h3 = badgeContainer.querySelector('h3');
+                    if (h3) {
+                        var badge = document.createElement('span');
+                        badge.className = 'text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-medium';
+                        badge.textContent = 'Update available';
+                        h3.parentNode.insertBefore(badge, h3.nextSibling);
+                    }
+                } else if (!stale && existingBadge) {
+                    existingBadge.remove();
+                }
             }
         }
 

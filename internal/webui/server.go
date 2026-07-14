@@ -63,7 +63,7 @@ type ContainerInfo struct {
 
 var dbImagePatterns = regexp.MustCompile(`(?i)^(mysql|mariadb|postgres(?:ql)?|mongo(?:db)?|redis|memcached|influxdb|timescaledb|cockroach(?:db)?|cassandra|elasticsearch|opensearch|clickhouse|neo4j|couchdb|valkey|keydb|scylladb|mssql|percona|tidb|planetscale|dragonflydb|ferretdb)`)
 
-var sidecarImagePatterns = regexp.MustCompile(`(?i)^(apache/tika|gotenberg|tika|gotenberg/gotenberg|pdfjs|libreoffice|chromium|wkhtmltopdf|collabora|onlyoffice-documentserver|embedder)`)
+var sidecarImagePatterns = regexp.MustCompile(`(?i)(tika|gotenberg|pdfjs|libreoffice|chromium|wkhtmltopdf|collabora|onlyoffice|embedder|exiftool|ghostscript|imgproxy|pdfcpu|qpdf|poppler|pandoc)`)
 
 func isDatabaseImage(image string) bool {
 	repo := image
