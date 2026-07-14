@@ -11,46 +11,40 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+func (s *Server) renderTemplate(w http.ResponseWriter, name string, data interface{}) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.tmpl.ExecuteTemplate(w, name, data); err != nil {
+		logrus.WithError(err).WithField("template", name).Error("Failed to render template")
+		http.Error(w, "Template error", 500)
+	}
+}
+
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
-	data := map[string]interface{}{
+	s.renderTemplate(w, "dashboard.html", map[string]interface{}{
 		"Title":      "Dockyard",
 		"Version":    s.version,
 		"ActivePage": "dashboard",
-	}
-	if err := s.tmpl.ExecuteTemplate(w, "dashboard.html", data); err != nil {
-		logrus.WithError(err).Error("Failed to render dashboard")
-		http.Error(w, "Template error", 500)
-	}
+	})
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
-	settings := s.state.GetSettings()
-	data := map[string]interface{}{
+	s.renderTemplate(w, "settings.html", map[string]interface{}{
 		"Title":      "Settings - Dockyard",
-		"Settings":   settings,
+		"Settings":   s.state.GetSettings(),
 		"ActivePage": "settings",
-	}
-	if err := s.tmpl.ExecuteTemplate(w, "settings.html", data); err != nil {
-		logrus.WithError(err).Error("Failed to render settings")
-		http.Error(w, "Template error", 500)
-	}
+	})
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
-	history := s.state.GetHistory()
-	data := map[string]interface{}{
+	s.renderTemplate(w, "history.html", map[string]interface{}{
 		"Title":      "History - Dockyard",
-		"History":    history,
+		"History":    s.state.GetHistory(),
 		"ActivePage": "history",
-	}
-	if err := s.tmpl.ExecuteTemplate(w, "history.html", data); err != nil {
-		logrus.WithError(err).Error("Failed to render history")
-		http.Error(w, "Template error", 500)
-	}
+	})
 }
 
 func (s *Server) handleAPIContainers(w http.ResponseWriter, r *http.Request) {

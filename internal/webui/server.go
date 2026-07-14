@@ -228,15 +228,10 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 		errorMsg = sanitizeErrorParam(errorMsg)
 	}
 
-	data := map[string]interface{}{
+	s.renderTemplate(w, "login.html", map[string]interface{}{
 		"IsSetup": !s.auth.HasUsers(),
 		"Error":   errorMsg,
-	}
-
-	if err := s.tmpl.ExecuteTemplate(w, "login.html", data); err != nil {
-		logrus.WithError(err).Error("Failed to render login page")
-		http.Error(w, "Template error", 500)
-	}
+	})
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
