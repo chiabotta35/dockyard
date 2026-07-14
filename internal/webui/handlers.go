@@ -641,7 +641,7 @@ func (s *Server) handleAPICheckNow(w http.ResponseWriter, r *http.Request) {
 // sendCheckNotification sends a notification if there are updates or errors.
 func (s *Server) sendCheckNotification(updates, errors, upToDate, total int, details []checkDetail) {
 	settings := s.state.GetSettings()
-	if settings.NotificationURL == "" || (updates == 0 && errors == 0) {
+	if settings.NotificationURL == "" {
 		return
 	}
 
@@ -678,6 +678,10 @@ func (s *Server) sendCheckNotification(updates, errors, upToDate, total int, det
 			}
 		}
 		msgParts = append(msgParts, "")
+	}
+
+	if updates == 0 && errors == 0 {
+		msgParts = append(msgParts, "\u2705 All containers up to date")
 	}
 
 	msgParts = append(msgParts, fmt.Sprintf("Dockyard v%s", s.version))
@@ -797,9 +801,7 @@ func (s *Server) runAutoCheck(ctx context.Context) {
 		}
 	}
 
-	if stale > 0 || failed > 0 {
-		s.sendCheckNotification(stale, failed, upToDate, len(containers), details)
-	}
+	s.sendCheckNotification(stale, failed, upToDate, len(containers), details)
 
 	logrus.WithFields(logrus.Fields{
 		"total":    len(containers),
