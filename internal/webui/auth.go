@@ -43,6 +43,7 @@ type AuthStore struct {
 }
 
 func NewAuthStore(dataDir string) *AuthStore {
+	logrus.WithField("dataDir", dataDir).Info("Initializing auth store")
 	a := &AuthStore{
 		users:    make(map[string]*User),
 		sessions: make(map[string]*Session),
@@ -50,6 +51,7 @@ func NewAuthStore(dataDir string) *AuthStore {
 	}
 	a.load()
 	a.autoProvision()
+	logrus.WithField("users", len(a.users)).Info("Auth store initialized")
 	return a
 }
 
@@ -57,6 +59,7 @@ func (a *AuthStore) autoProvision() {
 	username := os.Getenv("DOCKYARD_ADMIN_USER")
 	password := os.Getenv("DOCKYARD_ADMIN_PASSWORD")
 	if username == "" || password == "" {
+		logrus.Debug("No DOCKYARD_ADMIN_USER/DOCKYARD_ADMIN_PASSWORD set, skipping auto-provision")
 		return
 	}
 	username = strings.TrimSpace(username)
@@ -103,11 +106,13 @@ func (a *AuthStore) SetHTTPS(enabled bool) {
 func (a *AuthStore) load() {
 	data, err := os.ReadFile(a.filePath)
 	if err != nil {
+		logrus.WithField("filePath", a.filePath).Debug("No existing auth file found, starting fresh")
 		return
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	json.Unmarshal(data, a)
+	logrus.WithField("users", len(a.users)).Debug("Loaded auth data from disk")
 }
 
 func (a *AuthStore) save() error {

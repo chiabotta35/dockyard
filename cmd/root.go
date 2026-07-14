@@ -288,6 +288,7 @@ func Execute() {
 //   - cmd: The cobra.Command instance being executed, providing access to parsed flags.
 //   - _: A slice of string arguments (unused here, as container names are handled in run).
 func preRun(cmd *cobra.Command, _ []string) {
+	logrus.Info("Dockyard starting up")
 	flagsSet := cmd.PersistentFlags()
 	flags.ProcessFlagAliases(flagsSet)
 
@@ -409,6 +410,7 @@ func preRun(cmd *cobra.Command, _ []string) {
 
 	// Initialize the Docker client before the orchestrator check.
 	// The orchestrator needs a valid client to perform container operations.
+	logrus.Info("Initializing Docker client")
 	client = container.NewClient(container.ClientOptions{
 		IncludeStopped:          includeStopped,
 		ReviveStopped:           reviveStopped,
@@ -418,6 +420,7 @@ func preRun(cmd *cobra.Command, _ []string) {
 		CPUCopyMode:             cpuCopyMode,
 		WarnOnHeadFailed:        container.WarningStrategy(warnOnHeadPullFailed),
 	})
+	logrus.Info("Docker client initialized")
 
 	// Check for orchestrator mode early — this is an internal mode where Watchtower
 	// runs as a one-shot orchestrator for self-update. It reads environment variables
@@ -671,7 +674,9 @@ func runMain(cfg types.RunConfig) int {
 	}
 
 	// Ensure the Docker client is fully initialized before proceeding.
+	logrus.Info("Awaiting Docker client initialization")
 	awaitDockerClient()
+	logrus.Info("Docker client ready")
 
 	// runUpdatesWithNotifications performs container updates and sends notifications about the results.
 	//
@@ -794,6 +799,7 @@ func runMain(cfg types.RunConfig) int {
 	}
 
 	// Check for and cleanup old Watchtower containers within scope.
+	logrus.Debug("Checking for excess Watchtower instances")
 	totalRemovedInstances, err := actions.RemoveExcessWatchtowerInstances(
 		ctx,
 		client,
@@ -813,6 +819,7 @@ func runMain(cfg types.RunConfig) int {
 	// Check for and cleanup orphaned ephemeral orchestrator containers.
 	// These may persist if the orchestrator crashed or was killed unexpectedly.
 	// With AutoRemove: true, this is a safety net for edge cases.
+	logrus.Debug("Checking for orphaned orchestrator containers")
 	removedOrchestratorCount, orchestratorErr := container.RemoveOrphanedOrchestrators(ctx, client)
 	if orchestratorErr != nil {
 		logrus.WithError(orchestratorErr).
@@ -846,6 +853,7 @@ func runMain(cfg types.RunConfig) int {
 		currentWatchtowerContainer.HasExposedPorts() &&
 		!ephemeralSelfUpdate
 
+	logrus.Debug("Setting up HTTP API")
 	err = api.SetupAndStartAPI(
 		ctx,
 		api.Options{
@@ -888,6 +896,11 @@ func runMain(cfg types.RunConfig) int {
 			webUIAddr = webUIHost + ":" + webUIPort
 		}
 
+		logrus.WithFields(logrus.Fields{
+			"addr": webUIAddr,
+			"data": webUIData,
+		}).Info("Starting Dockyard web UI")
+
 		state := webui.NewState(webUIData)
 		events := webui.NewEventHub()
 		auth := webui.NewAuthStore(webUIData)
@@ -899,16 +912,14 @@ func runMain(cfg types.RunConfig) int {
 			}
 		}()
 
-		logrus.WithFields(logrus.Fields{
-			"addr": webUIAddr,
-			"data": webUIData,
-		}).Info("Dockyard web UI enabled")
+		logrus.Info("Dockyard web UI started successfully")
 	}
 
 	// Schedule and execute periodic updates, handling errors or shutdown.
 	// The startup message is skipped here if it was already sent by the HTTP API in blocking mode.
 	startupMessageSent := cfg.EnableUpdateAPI && !cfg.UnblockHTTPAPI
 
+	logrus.WithField("schedule", scheduleSpec).Info("Starting update scheduler")
 	err = scheduling.RunUpgradesOnSchedule(
 		ctx, cfg.Command,
 		cfg.Filter,

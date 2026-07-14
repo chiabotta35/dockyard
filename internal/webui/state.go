@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 type UpdateMode string
@@ -58,6 +60,7 @@ type State struct {
 }
 
 func NewState(dataDir string) *State {
+	logrus.WithField("dataDir", dataDir).Info("Initializing state store")
 	s := &State{
 		Containers: make(map[string]*ContainerState),
 		Settings: Settings{
@@ -78,6 +81,12 @@ func NewState(dataDir string) *State {
 	}
 	s.load()
 	s.loadFromEnv()
+	logrus.WithFields(logrus.Fields{
+		"schedule":        s.Settings.Schedule,
+		"monitor_only":    s.Settings.MonitorOnly,
+		"cleanup":         s.Settings.Cleanup,
+		"update_on_start": s.Settings.UpdateOnStart,
+	}).Info("State store initialized")
 	return s
 }
 
@@ -151,6 +160,7 @@ func (s *State) loadFromEnv() {
 	}
 
 	if changed {
+		logrus.Info("State updated from environment variables")
 		s.mu.Unlock()
 		s.save()
 		s.mu.Lock()
@@ -160,11 +170,13 @@ func (s *State) loadFromEnv() {
 func (s *State) load() {
 	data, err := os.ReadFile(s.filePath)
 	if err != nil {
+		logrus.WithField("filePath", s.filePath).Debug("No existing state file found, using defaults")
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	json.Unmarshal(data, s)
+	logrus.WithField("filePath", s.filePath).Debug("Loaded state from disk")
 }
 
 func (s *State) save() error {

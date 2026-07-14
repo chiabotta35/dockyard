@@ -17,8 +17,8 @@ COPY --from=builder /dockyard /usr/local/bin/dockyard
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD wget -qO- http://localhost:8080/ || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD wget -qO- http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["dockyard"]
 CMD ["--web-ui", "--web-ui-port", "8080", "--schedule", "0 3 * * *", "--cleanup", "--update-on-start"]

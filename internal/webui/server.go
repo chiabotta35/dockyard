@@ -55,6 +55,10 @@ type ContainerInfo struct {
 }
 
 func NewServer(state *State, events *EventHub, auth *AuthStore, client container.Client, filter types.Filter, addr, version string) *Server {
+	logrus.WithFields(logrus.Fields{
+		"version": version,
+		"addr":    addr,
+	}).Info("Creating web UI server")
 	s := &Server{
 		state:   state,
 		events:  events,
@@ -96,6 +100,7 @@ func (s *Server) loadTemplates() {
 	}
 
 	s.tmpl = template.Must(template.New("").Funcs(funcMap).ParseFS(tmplFS, "*.html"))
+	logrus.Debug("Templates loaded successfully")
 }
 
 func securityHeaders(next http.Handler) http.Handler {
@@ -148,13 +153,25 @@ func sanitizeContainerName(name string) (string, error) {
 func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 
+	logrus.WithField("addr", s.addr).Info("Initializing web UI routes")
+
 	staticFS, _ := fs.Sub(embeddedFS, "static")
 	mux.Handle("/static/", securityHeaders(http.StripPrefix("/static/", http.FileServer(http.FS(staticFS)))))
+	logrus.Debug("Registered static file server")
+
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+	logrus.Debug("Registered /health endpoint")
 
 	mux.HandleFunc("/login", s.handleLoginPage)
+	logrus.Debug("Registered /login route")
 	mux.HandleFunc("/auth/login", limitRequestBody(s.handleLogin))
 	mux.HandleFunc("/auth/register", limitRequestBody(s.handleRegister))
 	mux.HandleFunc("/auth/logout", s.handleLogout)
+	logrus.Debug("Registered auth routes")
 
 	protected := http.NewServeMux()
 	protected.HandleFunc("/", s.handleDashboard)
@@ -170,8 +187,10 @@ func (s *Server) Start(ctx context.Context) error {
 	protected.HandleFunc("/api/update/check", s.handleAPICheckUpdate)
 	protected.HandleFunc("/api/update/self", s.handleAPISelfUpdate)
 	protected.HandleFunc("/api/user/change-password", limitRequestBody(s.handleAPIChangePassword))
+	logrus.Debug("Registered protected page and API routes")
 
 	mux.Handle("/", securityHeaders(s.auth.AuthMiddleware(protected.ServeHTTP)))
+	logrus.Debug("All routes registered")
 
 	s.server = &http.Server{
 		Addr:              s.addr,
@@ -191,8 +210,10 @@ func (s *Server) Start(ctx context.Context) error {
 
 	logrus.WithField("addr", s.addr).Info("Dockyard web UI starting")
 	if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		logrus.WithError(err).WithField("addr", s.addr).Error("HTTP server failed")
 		return err
 	}
+	logrus.WithField("addr", s.addr).Info("HTTP server shut down gracefully")
 	return nil
 }
 
