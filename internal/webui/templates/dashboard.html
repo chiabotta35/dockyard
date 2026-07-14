@@ -68,7 +68,7 @@
             </div>
         </div>
 
-        <div class="grid grid-cols-5 gap-4 mb-6">
+        <div class="grid grid-cols-6 gap-4 mb-6">
             <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
                 <div class="text-sm text-gray-500">Total</div>
                 <div class="text-2xl font-bold mt-1" id="stat-total">-</div>
@@ -76,6 +76,10 @@
             <div class="bg-gray-900 border border-amber-500/30 rounded-xl p-4 transition-all" id="stat-updates-card">
                 <div class="text-sm text-amber-400/70">Updates</div>
                 <div class="text-2xl font-bold mt-1 text-amber-400" id="stat-updates">-</div>
+            </div>
+            <div class="bg-gray-900 border border-emerald-500/30 rounded-xl p-4 transition-all" id="stat-ok-card">
+                <div class="text-sm text-emerald-400/70">Up to date</div>
+                <div class="text-2xl font-bold mt-1 text-emerald-400" id="stat-ok">-</div>
             </div>
             <div class="bg-gray-900 border border-emerald-500/30 rounded-xl p-4">
                 <div class="text-sm text-emerald-400/70">Auto</div>
@@ -107,6 +111,12 @@
             </div>
         </div>
 
+        <div id="sidecar-section" class="hidden mt-4">
+            <button onclick="toggleSidecars()" id="sidecar-toggle" class="w-full text-left px-4 py-2.5 bg-gray-900 border border-gray-800 rounded-xl text-sm font-medium text-gray-400 hover:text-white hover:bg-gray-900/80 transition-colors flex items-center gap-2">
+            </button>
+            <div id="sidecar-grid" class="space-y-2 mt-2 hidden"></div>
+        </div>
+
         <div id="db-section" class="hidden mt-4">
             <button onclick="toggleDatabases()" id="db-toggle" class="w-full text-left px-4 py-2.5 bg-gray-900 border border-gray-800 rounded-xl text-sm font-medium text-gray-400 hover:text-white hover:bg-gray-900/80 transition-colors flex items-center gap-2">
             </button>
@@ -127,6 +137,7 @@
         var updateDone = 0;
         var updateStart = null;
         var showDatabases = false;
+        var showSidecars = false;
 
         var DB_IMAGES = /^(mysql|mariadb|postgres(?:ql)?|mongo(?:db)?|redis|memcached|influxdb|timescaledb|cockroach(?:db)?|cassandra|elasticsearch|opensearch|clickhouse|neo4j|couchdb|valkey|keydb|scylladb|mssql|percona|tidb|planetscale|dragonflydb|ferretdb)/i;
         var SIDECAR_IMAGES = /tika|gotenberg|pdfjs|libreoffice|chromium|wkhtmltopdf|collabora|onlyoffice|embedder|exiftool|ghostscript|imgproxy|pdfcpu|qpdf|poppler|pandoc/i;
@@ -312,18 +323,38 @@
 
         function renderList() {
             var filtered = getFiltered();
-            var regular = filtered.filter(function(c) { return !isDatabase(c); });
+            var regular = filtered.filter(function(c) { return !isDatabase(c) && !isSidecar(c); });
             var databases = filtered.filter(function(c) { return isDatabase(c); });
+            var sidecars = filtered.filter(function(c) { return isSidecar(c); });
             var grid = document.getElementById('container-grid');
             var dbGrid = document.getElementById('database-grid');
             var dbToggle = document.getElementById('db-toggle');
             var dbSection = document.getElementById('db-section');
+            var scGrid = document.getElementById('sidecar-grid');
+            var scToggle = document.getElementById('sidecar-toggle');
+            var scSection = document.getElementById('sidecar-section');
 
-            if (regular.length === 0 && databases.length === 0) {
+            if (regular.length === 0 && databases.length === 0 && sidecars.length === 0) {
                 grid.innerHTML = '<div class="text-center py-12 text-gray-500">No containers match this filter</div>';
                 if (dbSection) dbSection.classList.add('hidden');
+                if (scSection) scSection.classList.add('hidden');
             } else {
                 grid.innerHTML = regular.length > 0 ? regular.map(buildCard).join('') : '<div class="text-center py-4 text-gray-600 text-sm">No containers</div>';
+
+                if (sidecars.length > 0) {
+                    scSection.classList.remove('hidden');
+                    scToggle.textContent = 'Sidecars (' + sidecars.length + ') ' + (showSidecars ? '\u25B2' : '\u25BC');
+                    if (showSidecars) {
+                        scGrid.innerHTML = sidecars.map(buildCard).join('');
+                        scGrid.classList.remove('hidden');
+                    } else {
+                        scGrid.innerHTML = '';
+                        scGrid.classList.add('hidden');
+                    }
+                } else {
+                    scSection.classList.add('hidden');
+                }
+
                 if (databases.length > 0) {
                     dbSection.classList.remove('hidden');
                     dbToggle.textContent = 'Databases (' + databases.length + ') ' + (showDatabases ? '\u25B2' : '\u25BC');
@@ -477,6 +508,11 @@
 
         window.toggleDatabases = function() {
             showDatabases = !showDatabases;
+            renderList();
+        };
+
+        window.toggleSidecars = function() {
+            showSidecars = !showSidecars;
             renderList();
         };
 

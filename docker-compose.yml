@@ -8,6 +8,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./data:/app/data
+      - ./config.json:/config.json:ro
     environment:
       # --- Admin account (first run only, or to reset password) ---
       - DOCKYARD_ADMIN_USER=admin
@@ -36,6 +37,7 @@ services:
 
       # --- Docker ---
       - DOCKER_HOST=unix:///var/run/docker.sock
+      - DOCKER_CONFIG=/
       - TZ=UTC
     security_opt:
       - no-new-privileges:true
