@@ -20,10 +20,12 @@ const (
 )
 
 type ContainerState struct {
-	UpdateMode  UpdateMode `json:"update_mode"`
-	DeferUntil  *time.Time `json:"defer_until,omitempty"`
-	ChangelogURL string    `json:"changelog_url,omitempty"`
-	LastUpdated  *time.Time `json:"last_updated,omitempty"`
+	UpdateMode    UpdateMode `json:"update_mode"`
+	DeferUntil    *time.Time `json:"defer_until,omitempty"`
+	ChangelogURL  string     `json:"changelog_url,omitempty"`
+	LastUpdated   *time.Time `json:"last_updated,omitempty"`
+	PreviousImage string     `json:"previous_image,omitempty"`
+	PreviousImageID string   `json:"previous_image_id,omitempty"`
 }
 
 type Settings struct {
@@ -314,4 +316,37 @@ func (s *State) GetAllContainerStates() map[string]*ContainerState {
 		out[k] = &cp
 	}
 	return out
+}
+
+func (s *State) SavePreviousImage(name, image, imageID string) error {
+	s.mu.Lock()
+	cs, ok := s.Containers[name]
+	if !ok {
+		cs = &ContainerState{UpdateMode: ModeManual}
+		s.Containers[name] = cs
+	}
+	cs.PreviousImage = image
+	cs.PreviousImageID = imageID
+	s.mu.Unlock()
+	return s.save()
+}
+
+func (s *State) GetPreviousImage(name string) (string, string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cs, ok := s.Containers[name]
+	if !ok || cs.PreviousImage == "" {
+		return "", "", false
+	}
+	return cs.PreviousImage, cs.PreviousImageID, true
+}
+
+func (s *State) ClearPreviousImage(name string) error {
+	s.mu.Lock()
+	if cs, ok := s.Containers[name]; ok {
+		cs.PreviousImage = ""
+		cs.PreviousImageID = ""
+	}
+	s.mu.Unlock()
+	return s.save()
 }

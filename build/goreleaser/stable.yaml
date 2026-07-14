@@ -37,9 +37,9 @@ gomod:
 # https://goreleaser.com/customization/builds/go/
 ################################################################################
 builds:
-  - id: "watchtower-binary"
+  - id: "dockyard-binary"
     main: "main.go"
-    binary: "watchtower"
+    binary: "dockyard"
     flags:
       - -trimpath
     ldflags:
@@ -47,7 +47,7 @@ builds:
       - -X main.version={{ .Version }}
       - -X main.commit={{ .Commit }}
       - -X main.date={{ .CommitDate }}
-      - -X github.com/nicholas-fedor/watchtower/internal/meta.Version={{ .Version }}
+      - -X github.com/dockyard/dockyard/internal/meta.Version={{ .Version }}
     env:
       - CGO_ENABLED=0
     goos:

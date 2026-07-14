@@ -38,20 +38,22 @@ type Server struct {
 }
 
 type ContainerInfo struct {
-	Name         string            `json:"name"`
-	Image        string            `json:"image"`
-	Status       string            `json:"status"`
-	State        string            `json:"state"`
-	Stale        bool              `json:"stale"`
-	Ports        string            `json:"ports"`
-	ComposeStack string            `json:"compose_stack"`
-	UpdateMode   string            `json:"update_mode"`
-	IsDeferred   bool              `json:"is_deferred"`
-	DeferUntil   string            `json:"defer_until,omitempty"`
-	ChangelogURL string            `json:"changelog_url,omitempty"`
-	Labels       map[string]string `json:"labels"`
-	Created      string            `json:"created"`
-	ImageID      string            `json:"image_id"`
+	Name             string            `json:"name"`
+	Image            string            `json:"image"`
+	Status           string            `json:"status"`
+	State            string            `json:"state"`
+	Stale            bool              `json:"stale"`
+	Ports            string            `json:"ports"`
+	ComposeStack     string            `json:"compose_stack"`
+	UpdateMode       string            `json:"update_mode"`
+	IsDeferred       bool              `json:"is_deferred"`
+	DeferUntil       string            `json:"defer_until,omitempty"`
+	ChangelogURL     string            `json:"changelog_url,omitempty"`
+	Labels           map[string]string `json:"labels"`
+	Created          string            `json:"created"`
+	ImageID          string            `json:"image_id"`
+	HasPreviousImage bool              `json:"has_previous_image"`
+	PreviousImage    string            `json:"previous_image,omitempty"`
 }
 
 func NewServer(state *State, events *EventHub, auth *AuthStore, client container.Client, filter types.Filter, addr, version string) *Server {
@@ -366,14 +368,7 @@ func (s *Server) handleAPISelfUpdate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getContainerList() []ContainerInfo {
 	ctx := context.Background()
-	var containers []types.Container
-	var err error
-
-	if s.filter != nil {
-		containers, err = s.client.ListContainers(ctx, s.filter)
-	} else {
-		containers, err = s.client.ListContainers(ctx)
-	}
+	containers, err := s.client.ListContainers(ctx)
 	if err != nil {
 		logrus.WithError(err).Error("Failed to list containers")
 		return nil
@@ -392,6 +387,11 @@ func (s *Server) getContainerList() []ContainerInfo {
 			IsDeferred:   s.state.IsDeferred(name),
 			ChangelogURL: cs.ChangelogURL,
 			ImageID:      string(c.ImageID()),
+		}
+
+		if cs.PreviousImage != "" {
+			ci.HasPreviousImage = true
+			ci.PreviousImage = cs.PreviousImage
 		}
 
 		if cs.DeferUntil != nil {

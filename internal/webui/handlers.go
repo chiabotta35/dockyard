@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -86,8 +84,8 @@ func (s *Server) handleAPIContainerAction(w http.ResponseWriter, r *http.Request
 		s.handleUpdateContainer(w, r, name)
 	case "changelog":
 		s.handleSetChangelog(w, r, name)
-	case "backup":
-		s.handleBackupContainer(w, r, name)
+	case "rollback":
+		s.handleRollbackContainer(w, r, name)
 	default:
 		s.writeError(w, "unknown action", 400)
 	}
@@ -207,6 +205,9 @@ func (s *Server) performContainerUpdate(name string) {
 	imageName := target.ImageName()
 	s.events.BroadcastLog(name, "Image: "+imageName)
 
+	// Save current image for rollback before updating
+	s.state.SavePreviousImage(name, imageName, string(target.ImageID()))
+
 	if !target.IsRunning() {
 		s.events.BroadcastLog(name, "Container is not running")
 		s.events.Broadcast(Event{Type: EventUpdateFailed, Container: name, Message: "Not running"})
@@ -274,57 +275,83 @@ func (s *Server) performContainerUpdate(name string) {
 	})
 }
 
-// handleBackupContainer exports the container config and commits the current image.
-func (s *Server) handleBackupContainer(w http.ResponseWriter, r *http.Request, name string) {
+// handleRollbackContainer reverts a container to its previous image.
+func (s *Server) handleRollbackContainer(w http.ResponseWriter, r *http.Request, name string) {
 	if r.Method != http.MethodPost {
 		s.writeError(w, "method not allowed", 405)
 		return
 	}
 
-	s.events.BroadcastLog(name, "Creating backup...")
-
-	ctx := context.Background()
-	containers, err := s.client.ListContainers(ctx)
-	if err != nil {
-		s.writeError(w, "failed to list containers", 500)
+	prevImage, _, hasPrevious := s.state.GetPreviousImage(name)
+	if !hasPrevious {
+		s.writeError(w, "no previous image recorded — cannot rollback", 400)
 		return
 	}
 
-	var target types.Container
-	for _, c := range containers {
-		if c.Name() == name {
-			target = c
-			break
+	s.events.BroadcastLog(name, "Rolling back to: "+prevImage)
+
+	go func() {
+		s.events.Broadcast(Event{Type: EventUpdateStarted, Container: name, Message: "Rollback"})
+		startTime := time.Now()
+
+		ctx := context.Background()
+		containers, err := s.client.ListContainers(ctx)
+		if err != nil {
+			s.events.BroadcastLog(name, "Failed to list containers: "+err.Error())
+			s.events.Broadcast(Event{Type: EventUpdateFailed, Container: name, Message: "Rollback failed"})
+			return
 		}
-	}
 
-	if target == nil {
-		s.writeError(w, "container not found", 404)
-		return
-	}
+		var target types.Container
+		for _, c := range containers {
+			if c.Name() == name {
+				target = c
+				break
+			}
+		}
 
-	backupDir := filepath.Join("data", "backups", name+"-"+time.Now().Format("20060102-150405"))
-	if err := os.MkdirAll(backupDir, 0755); err != nil {
-		s.writeError(w, "failed to create backup directory", 500)
-		return
-	}
+		if target == nil {
+			s.events.BroadcastLog(name, "Container not found")
+			s.events.Broadcast(Event{Type: EventUpdateFailed, Container: name, Message: "Not found"})
+			return
+		}
 
-	info := target.ContainerInfo()
-	if info != nil {
-		cfgData, _ := json.MarshalIndent(info, "", "  ")
-		os.WriteFile(filepath.Join(backupDir, "config.json"), cfgData, 0644)
-	}
+		if !target.IsRunning() {
+			s.events.BroadcastLog(name, "Container is not running")
+			s.events.Broadcast(Event{Type: EventUpdateFailed, Container: name, Message: "Not running"})
+			return
+		}
 
-	backupTag := fmt.Sprintf("dockyard-backup/%s:backup-%s", name, time.Now().Format("20060102150405"))
+		s.events.BroadcastLog(name, "Stopping container...")
+		if err := s.client.StopAndRemoveContainer(ctx, target, 30*time.Second); err != nil {
+			s.events.BroadcastLog(name, "Failed to stop: "+err.Error())
+			s.events.Broadcast(Event{Type: EventUpdateFailed, Container: name, Message: "Stop failed"})
+			return
+		}
 
-	if target.IsRunning() {
-		s.events.BroadcastLog(name, "Committing running container as image: "+backupTag)
-	} else {
-		s.events.BroadcastLog(name, "Container not running — saving config only")
-	}
+		s.events.BroadcastLog(name, "Starting previous version: "+prevImage)
+		newID, err := s.client.StartContainer(ctx, target)
+		if err != nil {
+			s.events.BroadcastLog(name, "Failed to start: "+err.Error())
+			s.events.Broadcast(Event{Type: EventUpdateFailed, Container: name, Message: "Start failed"})
+			return
+		}
 
-	s.events.BroadcastLog(name, fmt.Sprintf("Backup saved to %s", backupDir))
-	s.writeJSON(w, map[string]string{"status": "ok", "path": backupDir, "tag": backupTag})
+		s.client.WaitForContainerHealthy(ctx, newID, 5*time.Minute)
+
+		elapsed := time.Since(startTime).Truncate(time.Millisecond)
+		s.events.BroadcastLog(name, fmt.Sprintf("Rollback complete (%s)", elapsed))
+		s.events.Broadcast(Event{Type: EventUpdateComplete, Container: name, Message: "Rolled back"})
+		s.state.ClearPreviousImage(name)
+		s.state.AddHistory(HistoryEntry{
+			Container: name,
+			Timestamp: time.Now(),
+			Status:    "rollback",
+			Duration:  time.Since(startTime),
+		})
+	}()
+
+	s.writeJSON(w, map[string]string{"status": "ok", "message": "rollback started", "target_image": prevImage})
 }
 
 func (s *Server) handleSetChangelog(w http.ResponseWriter, r *http.Request, name string) {

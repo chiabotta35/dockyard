@@ -187,7 +187,9 @@
                 if (c.update_mode !== 'ignore') {
                     actionBtns += '<button onclick="event.stopPropagation(); triggerUpdate(\'' + safeName + '\')" class="bg-dock-600 hover:bg-dock-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">Update</button>';
                 }
-                actionBtns += '<button onclick="event.stopPropagation(); backupContainer(\'' + safeName + '\')" class="bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors" title="Backup config">Backup</button>';
+                if (c.has_previous_image) {
+                    actionBtns += '<button onclick="event.stopPropagation(); rollbackContainer(\'' + safeName + '\')" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors" title="Rollback to ' + escapeHtml(c.previous_image) + '">Rollback</button>';
+                }
 
                 let deferBtns = '';
                 if (c.update_mode !== 'ignore') {
@@ -238,6 +240,7 @@
                     (c.compose_stack ? '<div><div class="text-xs text-gray-500">Stack</div><div class="text-sm text-gray-300">' + escapeHtml(c.compose_stack) + '</div></div>' : '') +
                     (c.ports ? '<div><div class="text-xs text-gray-500">Ports</div><div class="text-sm font-mono text-gray-300">' + escapeHtml(c.ports) + '</div></div>' : '') +
                     (c.is_deferred ? '<div><div class="text-xs text-gray-500">Deferred Until</div><div class="text-sm text-purple-400">' + escapeHtml(c.defer_until) + '</div></div>' : '') +
+                    (c.has_previous_image ? '<div class="col-span-2"><div class="text-xs text-gray-500">Previous Image (rollback available)</div><div class="text-sm font-mono text-amber-400">' + escapeHtml(c.previous_image) + '</div></div>' : '') +
                     '</div>' +
                     // Mode selector + defer
                     '<div class="flex items-center gap-3">' +
@@ -301,13 +304,14 @@
             });
         }
 
-        function backupContainer(name) {
-            fetch('/api/containers/' + name + '/backup', {
+        function rollbackContainer(name) {
+            if (!confirm('Rollback ' + name + ' to its previous version?')) return;
+            fetch('/api/containers/' + name + '/rollback', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'}
             }).then(r => r.json()).then(data => {
                 if (!containerLogs[name]) containerLogs[name] = [];
-                containerLogs[name].push({time: new Date().toLocaleTimeString(), msg: 'Backup saved: ' + (data.path || 'unknown')});
+                containerLogs[name].push({time: new Date().toLocaleTimeString(), msg: 'Rolling back to: ' + (data.target_image || 'previous version')});
                 renderContainerLogs(name);
                 expandedContainer = name;
                 var el = document.getElementById('detail-' + name);
