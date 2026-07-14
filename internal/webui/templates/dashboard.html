@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
@@ -59,7 +59,7 @@
                 <p class="text-sm text-gray-500 mt-0.5">Monitor and manage Docker container updates</p>
             </div>
             <div class="flex items-center gap-3">
-                <button hx-post="/api/check" hx-swap="none" hx-on::after-request="htmx.trigger('#container-grid', 'refresh')" class="bg-dock-600 hover:bg-dock-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+                <button hx-post="/api/check" hx-swap="none" hx-on::after-request="refreshContainers()" class="bg-dock-600 hover:bg-dock-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
                     <span class="htmx-indicator animate-spin">&#8635;</span>
                     <span>Check Now</span>
                 </button>
@@ -97,7 +97,7 @@
         </div>
 
         <!-- Container grid -->
-        <div id="container-grid" class="space-y-3" hx-get="/api/containers" hx-trigger="every 10s" hx-swap="innerHTML">
+        <div id="container-grid" class="space-y-3">
             <div class="text-center py-12 text-gray-500">
                 <div class="animate-spin text-2xl mb-2">&#8635;</div>
                 Loading containers...
@@ -116,6 +116,8 @@
 
     <script>
         let currentFilter = 'all';
+        let cachedContainers = [];
+        let isLoading = false;
 
         function escapeHtml(str) {
             if (!str) return '';
@@ -124,18 +126,21 @@
             return div.innerHTML;
         }
 
+        function renderFromCache() {
+            document.getElementById('container-grid').innerHTML = renderContainerList(cachedContainers);
+        }
+
         function filterContainers(filter, btn) {
             currentFilter = filter;
             document.querySelectorAll('.filter-tab').forEach(t => {
                 t.className = t.className.replace(/text-white border-dock-500/g, 'text-gray-500 border-transparent');
             });
             btn.className = btn.className.replace(/text-gray-500 border-transparent/g, 'text-white border-dock-500');
-            htmx.trigger('#container-grid', 'refresh');
+            renderFromCache();
         }
 
         function renderContainerList(data) {
-            if (!data || !Array.isArray(data)) {
-                data = JSON.parse(document.getElementById('container-grid').getAttribute('hx-get'));
+            if (!data || !Array.isArray(data) || data.length === 0) {
                 return '<div class="text-center py-12 text-gray-500">No containers found</div>';
             }
 
@@ -227,7 +232,7 @@
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({mode: mode})
-            }).then(() => htmx.trigger('#container-grid', 'refresh'));
+            }).then(() => refreshContainers());
         }
 
         function triggerUpdate(name) {
@@ -236,7 +241,7 @@
                 headers: {'Content-Type': 'application/json'}
             }).then(() => {
                 showLog();
-                htmx.trigger('#container-grid', 'refresh');
+                refreshContainers();
             });
         }
 
@@ -245,14 +250,14 @@
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({days: days})
-            }).then(() => htmx.trigger('#container-grid', 'refresh'));
+            }).then(() => refreshContainers());
         }
 
         function cancelDefer(name) {
             fetch('/api/containers/' + name + '/cancel-defer', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'}
-            }).then(() => htmx.trigger('#container-grid', 'refresh'));
+            }).then(() => refreshContainers());
         }
 
         function showLog() {
@@ -261,6 +266,19 @@
 
         function toggleLog() {
             document.getElementById('log-panel').classList.toggle('hidden');
+        }
+
+        function refreshContainers() {
+            if (isLoading) return;
+            isLoading = true;
+            fetch('/api/containers')
+                .then(r => r.json())
+                .then(data => {
+                    cachedContainers = data;
+                    renderFromCache();
+                    isLoading = false;
+                })
+                .catch(() => { isLoading = false; });
         }
 
         // SSE for live events
@@ -277,38 +295,16 @@
         });
 
         eventSource.addEventListener('update_started', function(e) {
-            const data = JSON.parse(e.data);
             showLog();
         });
 
         eventSource.addEventListener('update_complete', function(e) {
-            htmx.trigger('#container-grid', 'refresh');
+            refreshContainers();
         });
 
-        // Custom rendering for the container list
-        htmx.on('htmx:beforeSwap', function(e) {
-            if (e.detail.target.id === 'container-grid') {
-                e.detail.shouldSwap = true;
-                e.detail.serverResponse = '';
-            }
-        });
-
-        htmx.on('htmx:afterSwap', function(e) {
-            if (e.detail.target.id === 'container-grid') {
-                fetch('/api/containers')
-                    .then(r => r.json())
-                    .then(data => {
-                        e.detail.target.innerHTML = renderContainerList(data);
-                    });
-            }
-        });
-
-        // Initial load
-        fetch('/api/containers')
-            .then(r => r.json())
-            .then(data => {
-                document.getElementById('container-grid').innerHTML = renderContainerList(data);
-            });
+        // Initial load + periodic refresh
+        refreshContainers();
+        setInterval(refreshContainers, 10000);
     </script>
 </body>
 </html>
