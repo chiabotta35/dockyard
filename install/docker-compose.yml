@@ -7,7 +7,7 @@ services:
       - "8082:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - dockyard-data:/app/data
+      - ./data:/app/data
     environment:
       # --- Admin account (first run only, or to reset password) ---
       - DOCKYARD_ADMIN_USER=admin
@@ -47,6 +47,3 @@ services:
         limits:
           memory: 512M
           cpus: "1.0"
-
-volumes:
-  dockyard-data:

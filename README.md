@@ -18,7 +18,7 @@ services:
       - "8082:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - dockyard-data:/app/data
+      - ./data:/app/data
     environment:
       - DOCKYARD_ADMIN_USER=admin
       - DOCKYARD_ADMIN_PASSWORD=changeme
@@ -36,9 +36,6 @@ services:
         limits:
           memory: 512M
           cpus: "1.0"
-
-volumes:
-  dockyard-data:
 ```
 
 Then:
