@@ -6,7 +6,6 @@
     <title>{{.Title}}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-    <script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/sse.js"></script>
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -20,20 +19,17 @@
         }
     </script>
     <style>
-        [x-cloak] { display: none !important; }
-        .htmx-indicator { display: none; }
-        .htmx-request .htmx-indicator { display: inline-block; }
-        .htmx-request.htmx-indicator { display: inline-block; }
         body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
         .fade-in { animation: fadeIn 0.3s ease-in; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
         .status-pulse { animation: pulse 2s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        .log-scroll { max-height: 400px; overflow-y: auto; scrollbar-width: thin; }
+        .log-line { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+        details[open] summary .chevron { transform: rotate(90deg); }
+        .chevron { transition: transform 0.15s ease; }
     </style>
 </head>
 <body class="bg-gray-950 text-gray-100 min-h-screen">
-    <!-- Nav -->
     <nav class="bg-gray-900 border-b border-gray-800 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-14">
@@ -59,12 +55,13 @@
                 <p class="text-sm text-gray-500 mt-0.5">Monitor and manage Docker container updates</p>
             </div>
             <div class="flex items-center gap-3">
+                <span id="update-eta" class="text-sm text-gray-400 hidden"></span>
                 <button id="self-update-btn" onclick="selfUpdate()" class="hidden bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
                     <span>&#8635;</span>
                     <span id="self-update-text">Update Dockyard</span>
                 </button>
-                <button hx-post="/api/check" hx-swap="none" hx-on::after-request="refreshContainers()" class="bg-dock-600 hover:bg-dock-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
-                    <span class="htmx-indicator animate-spin">&#8635;</span>
+                <button onclick="checkAll()" id="check-btn" class="bg-dock-600 hover:bg-dock-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+                    <span id="check-spinner" class="hidden animate-spin">&#8635;</span>
                     <span>Check Now</span>
                 </button>
             </div>
@@ -100,21 +97,12 @@
             <button class="filter-tab px-3 py-1.5 text-sm rounded-t-md border-b-2 transition-colors text-gray-500 border-transparent hover:text-gray-300" data-filter="ignored" onclick="filterContainers('ignored', this)">Ignored</button>
         </div>
 
-        <!-- Container grid -->
-        <div id="container-grid" class="space-y-3">
+        <!-- Container list -->
+        <div id="container-grid" class="space-y-2">
             <div class="text-center py-12 text-gray-500">
                 <div class="animate-spin text-2xl mb-2">&#8635;</div>
                 Loading containers...
             </div>
-        </div>
-
-        <!-- Update log panel -->
-        <div id="log-panel" class="mt-6 bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hidden">
-            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-                <h3 class="text-sm font-semibold text-gray-300">Live Update Log</h3>
-                <button onclick="toggleLog()" class="text-gray-500 hover:text-white text-sm">Close</button>
-            </div>
-            <div id="log-content" class="log-scroll p-4 font-mono text-xs text-gray-400 space-y-1"></div>
         </div>
     </div>
 
@@ -122,6 +110,11 @@
         let currentFilter = 'all';
         let cachedContainers = [];
         let isLoading = false;
+        let containerLogs = {};
+        let updateStartTime = null;
+        let updateTotalContainers = 0;
+        let updateCompletedContainers = 0;
+        let expandedContainer = null;
 
         function escapeHtml(str) {
             if (!str) return '';
@@ -132,6 +125,14 @@
 
         function renderFromCache() {
             document.getElementById('container-grid').innerHTML = renderContainerList(cachedContainers);
+            if (expandedContainer) {
+                var el = document.getElementById('detail-' + expandedContainer);
+                if (el) el.style.display = 'block';
+                var logEl = document.getElementById('logs-' + expandedContainer);
+                if (logEl && containerLogs[expandedContainer]) {
+                    renderContainerLogs(expandedContainer);
+                }
+            }
         }
 
         function filterContainers(filter, btn) {
@@ -170,7 +171,7 @@
             document.getElementById('stat-deferred').textContent = deferred;
 
             return filtered.map(c => {
-                let statusColor = c.stale ? 'bg-amber-500/10 border-amber-500/30' : 'bg-gray-800/50 border-gray-800';
+                let safeName = escapeHtml(c.name);
                 let statusDot = c.stale ? 'bg-amber-400 status-pulse' : (c.state === 'running' ? 'bg-emerald-400' : 'bg-red-400');
                 let statusText = c.stale ? 'Update Available' : (c.state === 'running' ? 'Up to Date' : 'Stopped');
                 let stateBadge = c.state === 'running' ? '<span class="text-xs text-emerald-400">&#9679; running</span>' : '<span class="text-xs text-red-400">&#9679; stopped</span>';
@@ -179,48 +180,85 @@
                 let modeColor = c.update_mode === 'auto' ? 'text-emerald-400' : (c.update_mode === 'ignore' ? 'text-red-400' : 'text-amber-400');
                 let modeLabel = c.update_mode === 'auto' ? 'Auto' : (c.update_mode === 'ignore' ? 'Ignore' : 'Manual');
 
-                let deferBadge = c.is_deferred ? '<span class="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded-full">Deferred until ' + escapeHtml(c.defer_until) + '</span>' : '';
+                let deferBadge = c.is_deferred ? '<span class="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded-full ml-2">Deferred ' + escapeHtml(c.defer_until) + '</span>' : '';
                 let stackBadge = c.compose_stack ? '<span class="text-xs bg-dock-500/20 text-dock-500 px-2 py-0.5 rounded-full">' + escapeHtml(c.compose_stack) + '</span>' : '';
 
-                let safeName = escapeHtml(c.name);
-                let updateBtn = c.update_mode !== 'ignore' ? '<button onclick="triggerUpdate(\'' + safeName + '\')" class="bg-dock-600 hover:bg-dock-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">Update</button>' : '';
+                let actionBtns = '';
+                if (c.update_mode !== 'ignore') {
+                    actionBtns += '<button onclick="event.stopPropagation(); triggerUpdate(\'' + safeName + '\')" class="bg-dock-600 hover:bg-dock-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">Update</button>';
+                }
+                actionBtns += '<button onclick="event.stopPropagation(); backupContainer(\'' + safeName + '\')" class="bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors" title="Backup config">Backup</button>';
 
-                let deferBtns = c.update_mode !== 'ignore' && !c.is_deferred ?
-                    '<div class="flex gap-1"><button onclick="deferContainer(\'' + safeName + '\', 7)" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-2 py-1 rounded transition-colors">7d</button>' +
-                    '<button onclick="deferContainer(\'' + safeName + '\', 14)" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-2 py-1 rounded transition-colors">14d</button>' +
-                    '<button onclick="deferContainer(\'' + safeName + '\', 30)" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-2 py-1 rounded transition-colors">30d</button></div>'
-                    : (c.is_deferred ? '<button onclick="cancelDefer(\'' + safeName + '\')" class="text-xs bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 px-2 py-1 rounded transition-colors">Cancel Defer</button>' : '');
+                let deferBtns = '';
+                if (c.update_mode !== 'ignore') {
+                    if (!c.is_deferred) {
+                        deferBtns = '<div class="flex gap-1">' +
+                            '<button onclick="event.stopPropagation(); deferContainer(\'' + safeName + '\', 7)" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-2 py-1 rounded">7d</button>' +
+                            '<button onclick="event.stopPropagation(); deferContainer(\'' + safeName + '\', 14)" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-2 py-1 rounded">14d</button>' +
+                            '<button onclick="event.stopPropagation(); deferContainer(\'' + safeName + '\', 30)" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-2 py-1 rounded">30d</button></div>';
+                    } else {
+                        deferBtns = '<button onclick="event.stopPropagation(); cancelDefer(\'' + safeName + '\')" class="text-xs bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 px-2 py-1 rounded">Cancel Defer</button>';
+                    }
+                }
 
-                return '<div class="bg-gray-900 border border-gray-800 rounded-xl p-4 fade-in ' + statusColor + '">' +
+                let logCount = (containerLogs[c.name] || []).length;
+                let logBadge = logCount > 0 ? '<span class="text-xs text-gray-600 ml-2">' + logCount + ' lines</span>' : '';
+
+                return '<div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden fade-in">' +
+                    '<div class="p-4 cursor-pointer hover:bg-gray-900/50 transition-colors" onclick="toggleDetail(\'' + safeName + '\')">' +
                     '<div class="flex items-start justify-between">' +
                     '<div class="flex-1 min-w-0">' +
                     '<div class="flex items-center gap-2 mb-1">' +
+                    '<span class="chevron text-gray-600 text-xs inline-block">&#9654;</span>' +
                     '<div class="w-2.5 h-2.5 rounded-full ' + statusDot + '"></div>' +
                     '<h3 class="font-semibold text-white truncate">' + safeName + '</h3>' +
-                    stackBadge +
+                    stackBadge + deferBadge + logBadge +
                     '</div>' +
-                    '<p class="text-xs text-gray-500 font-mono truncate mb-1">' + escapeHtml(c.image) + '</p>' +
-                    '<div class="flex items-center gap-3 text-xs text-gray-500">' +
+                    '<p class="text-xs text-gray-500 font-mono truncate ml-7 mb-1">' + escapeHtml(c.image) + '</p>' +
+                    '<div class="flex items-center gap-3 text-xs text-gray-500 ml-7">' +
                     stateBadge +
                     '<span>' + escapeHtml(c.ports) + '</span>' +
-                    '<span>' + escapeHtml(c.created) + '</span>' +
                     '</div>' +
                     '</div>' +
                     '<div class="flex items-center gap-2 ml-4">' +
-                    '<span class="' + modeColor + ' text-sm" title="Mode: ' + modeLabel + '">' + modeIcon + '</span>' +
-                    updateBtn +
+                    '<span class="' + modeColor + ' text-sm" title="' + modeLabel + '">' + modeIcon + '</span>' +
+                    actionBtns +
                     '</div>' +
                     '</div>' +
-                    '<div class="flex items-center justify-between mt-3 pt-3 border-t border-gray-800/50">' +
-                    '<div class="flex items-center gap-2">' +
-                    '<select onchange="setMode(\'' + safeName + '\', this.value)" class="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg px-2 py-1 focus:ring-dock-500 focus:border-dock-500">' +
-                    '<option value="manual"' + (c.update_mode === 'manual' ? ' selected' : '') + '>&#9998; Manual</option>' +
-                    '<option value="auto"' + (c.update_mode === 'auto' ? ' selected' : '') + '>&#9889; Auto-Update</option>' +
-                    '<option value="ignore"' + (c.update_mode === 'ignore' ? ' selected' : '') + '>&#128683; Ignore</option>' +
+                    '</div>' +
+                    // Detail panel (hidden by default)
+                    '<div id="detail-' + safeName + '" class="hidden border-t border-gray-800">' +
+                    '<div class="p-4 space-y-4">' +
+                    // Info grid
+                    '<div class="grid grid-cols-2 md:grid-cols-4 gap-3">' +
+                    '<div><div class="text-xs text-gray-500">Image</div><div class="text-sm font-mono text-gray-300 truncate" title="' + escapeHtml(c.image) + '">' + escapeHtml(c.image) + '</div></div>' +
+                    '<div><div class="text-xs text-gray-500">Image ID</div><div class="text-sm font-mono text-gray-300">' + escapeHtml(truncate(c.image_id, 19)) + '</div></div>' +
+                    '<div><div class="text-xs text-gray-500">State</div><div class="text-sm text-gray-300">' + (c.state === 'running' ? 'Running' : 'Stopped') + '</div></div>' +
+                    '<div><div class="text-xs text-gray-500">Mode</div><div class="text-sm text-gray-300">' + modeLabel + '</div></div>' +
+                    (c.compose_stack ? '<div><div class="text-xs text-gray-500">Stack</div><div class="text-sm text-gray-300">' + escapeHtml(c.compose_stack) + '</div></div>' : '') +
+                    (c.ports ? '<div><div class="text-xs text-gray-500">Ports</div><div class="text-sm font-mono text-gray-300">' + escapeHtml(c.ports) + '</div></div>' : '') +
+                    (c.is_deferred ? '<div><div class="text-xs text-gray-500">Deferred Until</div><div class="text-sm text-purple-400">' + escapeHtml(c.defer_until) + '</div></div>' : '') +
+                    '</div>' +
+                    // Mode selector + defer
+                    '<div class="flex items-center gap-3">' +
+                    '<select onchange="setMode(\'' + safeName + '\', this.value)" class="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg px-2 py-1">' +
+                    '<option value="manual"' + (c.update_mode === 'manual' ? ' selected' : '') + '>Manual</option>' +
+                    '<option value="auto"' + (c.update_mode === 'auto' ? ' selected' : '') + '>Auto-Update</option>' +
+                    '<option value="ignore"' + (c.update_mode === 'ignore' ? ' selected' : '') + '>Ignore</option>' +
                     '</select>' +
                     deferBtns +
                     '</div>' +
-                    '<div class="text-xs text-gray-600 font-mono">' + escapeHtml(truncate(c.image_id, 19)) + '</div>' +
+                    // Per-container log panel
+                    '<div id="logs-' + safeName + '" class="bg-gray-950 border border-gray-800 rounded-lg overflow-hidden">' +
+                    '<div class="flex items-center justify-between px-3 py-2 border-b border-gray-800">' +
+                    '<span class="text-xs font-medium text-gray-400">Logs</span>' +
+                    '<button onclick="clearContainerLogs(\'' + safeName + '\')" class="text-xs text-gray-600 hover:text-gray-400">Clear</button>' +
+                    '</div>' +
+                    '<div id="log-content-' + safeName + '" class="max-h-64 overflow-y-auto p-3 space-y-0.5 text-xs log-line">' +
+                    '<div class="text-gray-600">No logs yet</div>' +
+                    '</div>' +
+                    '</div>' +
+                    '</div>' +
                     '</div>' +
                     '</div>';
             }).join('');
@@ -229,6 +267,19 @@
         function truncate(str, n) {
             if (!str) return '';
             return str.length > n ? str.substring(0, n) + '...' : str;
+        }
+
+        function toggleDetail(name) {
+            var el = document.getElementById('detail-' + name);
+            if (!el) return;
+            var isHidden = el.classList.contains('hidden');
+            if (isHidden) {
+                el.classList.remove('hidden');
+                expandedContainer = name;
+            } else {
+                el.classList.add('hidden');
+                if (expandedContainer === name) expandedContainer = null;
+            }
         }
 
         function setMode(name, mode) {
@@ -244,8 +295,23 @@
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'}
             }).then(() => {
-                showLog();
-                refreshContainers();
+                if (!containerLogs[name]) containerLogs[name] = [];
+                expandedContainer = name;
+                refreshContainers(true);
+            });
+        }
+
+        function backupContainer(name) {
+            fetch('/api/containers/' + name + '/backup', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            }).then(r => r.json()).then(data => {
+                if (!containerLogs[name]) containerLogs[name] = [];
+                containerLogs[name].push({time: new Date().toLocaleTimeString(), msg: 'Backup saved: ' + (data.path || 'unknown')});
+                renderContainerLogs(name);
+                expandedContainer = name;
+                var el = document.getElementById('detail-' + name);
+                if (el) el.classList.remove('hidden');
             });
         }
 
@@ -264,14 +330,131 @@
             }).then(() => refreshContainers());
         }
 
-        function showLog() {
-            document.getElementById('log-panel').classList.remove('hidden');
+        function checkAll() {
+            var btn = document.getElementById('check-btn');
+            var spinner = document.getElementById('check-spinner');
+            btn.disabled = true;
+            spinner.classList.remove('hidden');
+
+            fetch('/api/check', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    btn.disabled = false;
+                    spinner.classList.add('hidden');
+                    cachedContainers = data;
+                    lastDataHash = dataHash(data);
+                    renderFromCache();
+                })
+                .catch(() => {
+                    btn.disabled = false;
+                    spinner.classList.add('hidden');
+                });
         }
 
-        function toggleLog() {
-            document.getElementById('log-panel').classList.toggle('hidden');
+        // Per-container log rendering
+        function renderContainerLogs(name) {
+            var el = document.getElementById('log-content-' + name);
+            if (!el) return;
+            var logs = containerLogs[name] || [];
+            if (logs.length === 0) {
+                el.innerHTML = '<div class="text-gray-600">No logs yet</div>';
+                return;
+            }
+            el.innerHTML = logs.map(l =>
+                '<div class="text-gray-500">' + escapeHtml(l.time) + ' <span class="text-dock-400">' + escapeHtml(l.msg) + '</span></div>'
+            ).join('');
+            el.scrollTop = el.scrollHeight;
         }
 
+        function clearContainerLogs(name) {
+            containerLogs[name] = [];
+            renderContainerLogs(name);
+        }
+
+        function addContainerLog(name, msg) {
+            if (!containerLogs[name]) containerLogs[name] = [];
+            containerLogs[name].push({time: new Date().toLocaleTimeString(), msg: msg});
+            if (expandedContainer === name) {
+                renderContainerLogs(name);
+            }
+            // Also update log count badge
+            renderFromCache();
+        }
+
+        // ETA tracking
+        function updateETA() {
+            var etaEl = document.getElementById('update-eta');
+            if (!updateStartTime || updateCompletedContainers >= updateTotalContainers) {
+                etaEl.classList.add('hidden');
+                return;
+            }
+            var elapsed = (Date.now() - updateStartTime) / 1000;
+            var perContainer = elapsed / updateCompletedContainers;
+            var remaining = (updateTotalContainers - updateCompletedContainers) * perContainer;
+            var mins = Math.floor(remaining / 60);
+            var secs = Math.floor(remaining % 60);
+            etaEl.textContent = 'ETA: ' + (mins > 0 ? mins + 'm ' : '') + secs + 's (' + updateCompletedContainers + '/' + updateTotalContainers + ')';
+            etaEl.classList.remove('hidden');
+        }
+
+        // SSE for live events
+        const eventSource = new EventSource('/api/events');
+
+        eventSource.addEventListener('log_line', function(e) {
+            const data = JSON.parse(e.data);
+            var name = data.container || '';
+            var msg = data.message || '';
+            if (name) {
+                addContainerLog(name, msg);
+            }
+        });
+
+        eventSource.addEventListener('update_started', function(e) {
+            const data = JSON.parse(e.data);
+            var name = data.container || '';
+            if (name) {
+                addContainerLog(name, 'Update started');
+            }
+        });
+
+        eventSource.addEventListener('update_complete', function(e) {
+            const data = JSON.parse(e.data);
+            var name = data.container || '';
+            if (name) {
+                addContainerLog(name, 'Update complete');
+                updateCompletedContainers++;
+                updateETA();
+                refreshContainers(true);
+            }
+        });
+
+        eventSource.addEventListener('update_failed', function(e) {
+            const data = JSON.parse(e.data);
+            var name = data.container || '';
+            if (name) {
+                addContainerLog(name, 'Update failed');
+                updateCompletedContainers++;
+                updateETA();
+            }
+            var btn = document.getElementById('self-update-btn');
+            if (btn) {
+                btn.disabled = false;
+                document.getElementById('self-update-text').textContent = 'Update Failed - Retry';
+            }
+        });
+
+        eventSource.addEventListener('scan_started', function(e) {
+            document.getElementById('check-btn').disabled = true;
+            document.getElementById('check-spinner').classList.remove('hidden');
+        });
+
+        eventSource.addEventListener('scan_complete', function(e) {
+            document.getElementById('check-btn').disabled = false;
+            document.getElementById('check-spinner').classList.add('hidden');
+            refreshContainers(true);
+        });
+
+        // Background refresh
         let lastDataHash = '';
 
         function dataHash(data) {
@@ -294,38 +477,6 @@
                 })
                 .catch(() => { isLoading = false; });
         }
-
-        // SSE for live events
-        const eventSource = new EventSource('/api/events');
-        eventSource.addEventListener('log_line', function(e) {
-            const data = JSON.parse(e.data);
-            const logEl = document.getElementById('log-content');
-            const line = document.createElement('div');
-            line.innerHTML = '<span class="text-gray-600">' + escapeHtml(new Date(data.timestamp).toLocaleTimeString()) + '</span> ' +
-                '<span class="text-dock-500">[' + escapeHtml(data.container || 'system') + ']</span> ' +
-                escapeHtml(data.message);
-            logEl.appendChild(line);
-            logEl.scrollTop = logEl.scrollHeight;
-        });
-
-        eventSource.addEventListener('update_started', function(e) {
-            showLog();
-            refreshContainers(true);
-        });
-
-        eventSource.addEventListener('update_complete', function(e) {
-            refreshContainers(true);
-        });
-
-        eventSource.addEventListener('update_progress', function(e) {
-            refreshContainers(true);
-        });
-
-        eventSource.addEventListener('update_failed', function(e) {
-            var btn = document.getElementById('self-update-btn');
-            btn.disabled = false;
-            document.getElementById('self-update-text').textContent = 'Update Failed - Retry';
-        });
 
         // Initial load + silent background refresh every 30s
         refreshContainers(true);
@@ -355,9 +506,7 @@
             document.getElementById('self-update-text').textContent = 'Updating...';
             fetch('/api/update/self', { method: 'POST' })
                 .then(r => r.json())
-                .then(() => {
-                    showLog();
-                })
+                .then(() => {})
                 .catch(() => {});
         }
     </script>

@@ -42,13 +42,14 @@ type Settings struct {
 }
 
 type HistoryEntry struct {
-	Container string    `json:"container"`
-	OldDigest string    `json:"old_digest"`
-	NewDigest string    `json:"new_digest"`
-	ImageName string    `json:"image_name"`
-	Timestamp time.Time `json:"timestamp"`
-	Status    string    `json:"status"`
-	Error     string    `json:"error,omitempty"`
+	Container string        `json:"container"`
+	OldDigest string        `json:"old_digest"`
+	NewDigest string        `json:"new_digest"`
+	ImageName string        `json:"image_name"`
+	Timestamp time.Time     `json:"timestamp"`
+	Status    string        `json:"status"`
+	Error     string        `json:"error,omitempty"`
+	Duration  time.Duration `json:"duration,omitempty"`
 }
 
 type State struct {
