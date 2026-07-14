@@ -69,24 +69,29 @@ func (a *AuthStore) autoProvision() {
 	}
 
 	a.mu.Lock()
-	defer a.mu.Unlock()
 
 	if existing, exists := a.users[username]; exists {
 		if err := bcrypt.CompareHashAndPassword([]byte(existing.PasswordHash), []byte(password)); err != nil {
 			hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 			if err != nil {
+				a.mu.Unlock()
 				logrus.WithError(err).Error("Failed to hash admin password")
 				return
 			}
 			existing.PasswordHash = string(hash)
 			a.sessions = make(map[string]*Session)
+			a.mu.Unlock()
+			a.save()
 			logrus.WithField("user", username).Info("Admin password updated from environment")
+		} else {
+			a.mu.Unlock()
 		}
 		return
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
+		a.mu.Unlock()
 		logrus.WithError(err).Error("Failed to hash admin password")
 		return
 	}
@@ -95,6 +100,7 @@ func (a *AuthStore) autoProvision() {
 		PasswordHash: string(hash),
 		CreatedAt:    time.Now().Format(time.RFC3339),
 	}
+	a.mu.Unlock()
 	a.save()
 	logrus.WithField("user", username).Info("Admin account created from environment")
 }
@@ -142,16 +148,15 @@ func (a *AuthStore) Register(username, password string) error {
 		return errors.New("password must be at least 8 characters")
 	}
 
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if _, exists := a.users[username]; exists {
-		return ErrUserExists
-	}
-
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
+	}
+
+	a.mu.Lock()
+	if _, exists := a.users[username]; exists {
+		a.mu.Unlock()
+		return ErrUserExists
 	}
 
 	a.users[username] = &User{
@@ -159,6 +164,7 @@ func (a *AuthStore) Register(username, password string) error {
 		PasswordHash: string(hash),
 		CreatedAt:    time.Now().Format(time.RFC3339),
 	}
+	a.mu.Unlock()
 
 	return a.save()
 }
