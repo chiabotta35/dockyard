@@ -1131,7 +1131,26 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	ch := s.events.Subscribe()
 	defer s.events.Unsubscribe(ch)
 
+	// Send keepalive pings every 30s to prevent proxies/browsers from
+	// dropping idle SSE connections (which would trigger history replay).
 	ctx := r.Context()
+	pingDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-pingDone:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				fmt.Fprintf(w, ": ping\n\n")
+				flusher.Flush()
+			}
+		}
+	}()
+	defer close(pingDone)
 	for {
 		select {
 		case <-ctx.Done():

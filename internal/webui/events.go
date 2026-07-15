@@ -51,8 +51,14 @@ func (h *EventHub) Subscribe() chan Event {
 	h.clients[ch] = struct{}{}
 	h.mu.Unlock()
 
+	// Replay structural events (scan/update status) but NOT log_line events.
+	// Log lines are persisted separately and replaying them on SSE reconnect
+	// causes duplicate "Update available" messages every time the connection drops.
 	h.mu.RLock()
 	for _, e := range h.history {
+		if e.Type == EventLogLine {
+			continue
+		}
 		select {
 		case ch <- e:
 		default:
