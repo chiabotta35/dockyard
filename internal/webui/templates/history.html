@@ -70,7 +70,7 @@
             return new Date(ts).toLocaleTimeString();
         }
 
-        function toggleHistoryLogs(id) {
+        function toggleHistoryLogs(id, sessionId) {
             var el = document.getElementById('logs-' + id);
             var chevron = document.getElementById('chevron-' + id);
             if (!el) return;
@@ -79,7 +79,7 @@
                 if (chevron) chevron.classList.add('open');
                 if (!el.dataset.loaded) {
                     el.dataset.loaded = '1';
-                    loadHistoryLogs(id, el);
+                    loadHistoryLogs(sessionId, id);
                 }
             } else {
                 el.classList.add('hidden');
@@ -87,12 +87,12 @@
             }
         }
 
-        function loadHistoryLogs(sessionID, container) {
-            var el = document.getElementById('logs-' + sessionID);
+        function loadHistoryLogs(sessionId, domId) {
+            var el = document.getElementById('logs-' + domId);
             if (!el) return;
             el.innerHTML = '<div class="p-3 text-xs text-gray-500">Loading logs...</div>';
 
-            var url = '/api/logs?session=' + encodeURIComponent(sessionID);
+            var url = '/api/logs?session=' + encodeURIComponent(sessionId);
             fetch(url)
                 .then(r => r.json())
                 .then(logs => {
@@ -150,10 +150,16 @@
                                     '<span class="inline-flex items-center gap-1 text-xs font-medium text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">&#8630; Rollback</span>' :
                                     '<span class="inline-flex items-center gap-1 text-xs font-medium text-gray-400 bg-gray-500/10 px-2 py-0.5 rounded-full">' + escapeHtml(h.status) + '</span>'));
 
-                        var duration = h.duration ? '<span class="text-xs text-gray-600">' + h.duration + '</span>' : '';
+                        function fmtDuration(ns) {
+                            if (!ns) return '';
+                            var ms = Math.round(ns / 1000000);
+                            if (ms < 1000) return ms + 'ms';
+                            return (ms / 1000).toFixed(1) + 's';
+                        }
+                        var duration = h.duration ? '<span class="text-xs text-gray-600">' + fmtDuration(h.duration) + '</span>' : '';
 
                         html += '<div class="border-b border-gray-800 last:border-b-0">' +
-                            '<div class="px-4 py-3 hover:bg-gray-800/30 cursor-pointer transition-colors" onclick="toggleHistoryLogs(\'' + id + '\')">' +
+                            '<div class="px-4 py-3 hover:bg-gray-800/30 cursor-pointer transition-colors" onclick="toggleHistoryLogs(\'' + id + '\', \'' + escapeHtml(h.session_id || '') + '\')">' +
                             '<div class="flex items-center justify-between">' +
                             '<div class="flex items-center gap-3">' +
                             '<span id="chevron-' + id + '" class="chevron text-gray-600 text-xs inline-block">&#9654;</span>' +

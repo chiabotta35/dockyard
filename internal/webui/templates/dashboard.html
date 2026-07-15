@@ -875,27 +875,6 @@
                 .catch(function() { isLoading = false; });
         }, 60000);
 
-        // Auto-check staleness every 12 hours
-        setInterval(function() {
-            containerLogs = {};
-            Object.keys(expanded).forEach(function(name) { renderLogPanel(name); });
-            fetch('/api/check?scope=main', { method: 'POST' })
-                .then(function(r) { return r.json(); })
-                .then(function(results) {
-                    results.forEach(function(r) {
-                        var c = containers.find(function(x) { return x.name === r.name; });
-                        if (c) {
-                            c.stale = r.stale;
-                            c.check_error = r.check_error || '';
-                            checked[r.name] = r.check_error ? 'error' : (r.stale ? 'stale' : 'ok');
-                        }
-                    });
-                    renderList();
-                    autoUpdateStale();
-                })
-                .catch(function() {});
-        }, 12 * 60 * 60 * 1000);
-
         // Auto-check status + live countdown
         var autoCheckData = { last_check: null, next_check: null, interval_ms: 0, interval_label: 'disabled' };
 

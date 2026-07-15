@@ -861,6 +861,26 @@ func (s *Server) runAutoCheck(ctx context.Context) {
 		"failed":   failed,
 		"upToDate": upToDate,
 	}).Info("Auto-check complete")
+
+	// Auto-update stale containers in auto mode (same as manual Check Now).
+	for _, d := range details {
+		if !d.stale {
+			continue
+		}
+		cs := s.state.GetContainerState(d.name)
+		if cs.UpdateMode != ModeAuto {
+			continue
+		}
+		if s.state.IsDeferred(d.name) {
+			continue
+		}
+		if isDatabaseImage(d.image) || isSidecarImage(d.image) {
+			continue
+		}
+		logrus.WithField("container", d.name).Info("Auto-check: triggering auto-update")
+		s.events.BroadcastLog(d.name, "Auto-update triggered by scheduled check")
+		go s.performContainerUpdate(d.name)
+	}
 }
 
 // handleCheckContainer checks staleness for a single container.
