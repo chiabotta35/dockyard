@@ -334,6 +334,19 @@ func (s *State) MarkUpdated(name string) error {
 	return s.save()
 }
 
+// WasRecentlyUpdated returns true if the container was successfully updated
+// within the given cooldown duration. This prevents re-triggering updates
+// for containers that were just restarted.
+func (s *State) WasRecentlyUpdated(name string, cooldown time.Duration) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cs, ok := s.Containers[name]
+	if !ok || cs.LastUpdated == nil {
+		return false
+	}
+	return time.Since(*cs.LastUpdated) < cooldown
+}
+
 func (s *State) GetAllContainerStates() map[string]*ContainerState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

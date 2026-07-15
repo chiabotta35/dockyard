@@ -42,7 +42,16 @@ type Server struct {
 	lastAutoCheck   time.Time
 	nextAutoCheck   time.Time
 	autoCheckMu     sync.RWMutex
+	updating        map[string]bool
+	updatingMu      sync.Mutex
 }
+
+// postUpdateCooldown is the minimum time between a successful update and the
+// next auto-check staleness evaluation for the same container. This prevents
+// the auto-check from immediately re-detecting a container as stale right
+// after it was updated (which can happen when digest comparisons or image
+// inspections race with Docker's internal state propagation).
+const postUpdateCooldown = 5 * time.Minute
 
 type ContainerInfo struct {
 	Name             string            `json:"name"`
@@ -101,13 +110,14 @@ func NewServer(state *State, events *EventHub, auth *AuthStore, client container
 		"addr":    addr,
 	}).Info("Creating web UI server")
 	s := &Server{
-		state:   state,
-		events:  events,
-		auth:    auth,
-		client:  client,
-		filter:  filter,
-		addr:    addr,
-		version: version,
+		state:    state,
+		events:   events,
+		auth:     auth,
+		client:   client,
+		filter:   filter,
+		addr:     addr,
+		version:  version,
+		updating: make(map[string]bool),
 	}
 	s.detectSelfContainer()
 	s.loadTemplates()

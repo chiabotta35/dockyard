@@ -53,7 +53,7 @@
         <div class="flex items-center justify-between mb-6">
             <div>
                 <h1 class="text-2xl font-bold">Container Dashboard</h1>
-                <p class="text-sm text-gray-500 mt-0.5">Monitor and manage Docker container updates</p>
+                <p class="text-sm text-gray-500 mt-0.5">Monitor and manage Docker container updates{{if .Version}} &middot; <span class="text-gray-600">{{.Version}}</span>{{end}}</p>
             </div>
             <div class="flex items-center gap-3">
                 <div id="update-progress" class="hidden flex items-center gap-3">
@@ -218,6 +218,16 @@
             var isExpanded = expanded[c.name];
             var vs = getVisualState(c);
 
+            // Extract version tag from image reference (e.g. "nginx:1.25" → "1.25")
+            var versionTag = '';
+            if (c.image) {
+                var parts = c.image.split(':');
+                if (parts.length > 1) {
+                    versionTag = parts[parts.length - 1].split('/').pop();
+                }
+            }
+            var versionBadge = versionTag ? '<span class="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded-full font-mono">' + esc(versionTag) + '</span>' : '';
+
             var statusDot, borderColor;
             switch (vs) {
                 case 'stale':    statusDot = 'bg-amber-400 status-pulse'; borderColor = ' border-l-2 border-l-amber-400'; break;
@@ -266,7 +276,7 @@
                 + '<div class="w-2.5 h-2.5 rounded-full ' + statusDot + '"></div>'
                 + '<h3 class="font-semibold text-white truncate">' + n + '</h3>'
                 + (c.is_self ? '<span class="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full">Self</span>' : '')
-                + statusBadge + stackBadge + deferBadge + logBadge
+                + versionBadge + statusBadge + stackBadge + deferBadge + logBadge
                 + '</div>'
                 + '<p class="text-xs text-gray-500 font-mono truncate ml-7 mb-1">' + esc(c.image) + '</p>'
                 + '<div class="flex items-center gap-3 text-xs text-gray-500 ml-7">'

@@ -13,8 +13,30 @@ import (
 	"github.com/nicholas-fedor/shoutrrr"
 	"github.com/sirupsen/logrus"
 
+	dockerContainer "github.com/moby/moby/api/types/container"
+
 	"github.com/dockyard/dockyard/pkg/types"
 )
+
+// rollbackContainer wraps a Container and overrides GetCreateConfig and
+// ImageName so that StartContainer recreates the container using the
+// previous image instead of the current one.
+type rollbackContainer struct {
+	types.Container
+	overrideImage string
+}
+
+func (r *rollbackContainer) GetCreateConfig() *dockerContainer.Config {
+	cfg := r.Container.GetCreateConfig()
+	if cfg != nil {
+		cfg.Image = r.overrideImage
+	}
+	return cfg
+}
+
+func (r *rollbackContainer) ImageName() string {
+	return r.overrideImage
+}
 
 func (s *Server) renderTemplate(w http.ResponseWriter, name string, data interface{}) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -191,9 +213,33 @@ func (s *Server) performContainerUpdate(name string) {
 	sessionID := s.state.StartSession(name)
 	defer s.state.EndSession(name)
 
+	// Guard: prevent concurrent updates for the same container.
+	s.updatingMu.Lock()
+	if s.updating[name] {
+		s.updatingMu.Unlock()
+		s.events.BroadcastLog(name, "Update already in progress — skipping")
+		s.events.Broadcast(Event{Type: EventUpdateComplete, Container: name, Message: "Skipped"})
+		s.state.EndSession(name)
+		return
+	}
+	s.updating[name] = true
+	s.updatingMu.Unlock()
+	defer func() {
+		s.updatingMu.Lock()
+		delete(s.updating, name)
+		s.updatingMu.Unlock()
+	}()
+
+	// Guard: skip if container was updated within the cooldown window.
+	if s.state.WasRecentlyUpdated(name, postUpdateCooldown) {
+		s.events.BroadcastLog(name, fmt.Sprintf("Updated recently — skipping (cooldown %s)", postUpdateCooldown))
+		s.events.Broadcast(Event{Type: EventUpdateComplete, Container: name, Message: "Skipped"})
+		return
+	}
+
 	startTime := time.Now()
 	s.events.Broadcast(Event{Type: EventUpdateStarted, Container: name, Message: "Updating", Data: map[string]string{"session_id": sessionID}})
-	s.events.BroadcastLog(name, "Checking for updates...")
+	s.events.BroadcastLog(name, "Pulling latest image...")
 
 	ctx := context.Background()
 
@@ -258,10 +304,11 @@ func (s *Server) performContainerUpdate(name string) {
 		}
 	}
 
+	// Pull the image and check for staleness in one call.
 	stale, newImage, err := s.client.IsContainerStale(ctx, target, types.UpdateParams{})
 	if err != nil {
-		s.events.BroadcastLog(name, "Staleness check failed: "+err.Error())
-		s.events.Broadcast(Event{Type: EventUpdateFailed, Container: name, Message: "Check failed"})
+		s.events.BroadcastLog(name, "Pull/check failed: "+err.Error())
+		s.events.Broadcast(Event{Type: EventUpdateFailed, Container: name, Message: "Pull failed"})
 		return
 	}
 
@@ -316,6 +363,9 @@ func (s *Server) performContainerUpdate(name string) {
 		return
 	}
 
+	// Remember the old image ID before we replace the container.
+	oldImageID := target.ImageID()
+
 	s.events.BroadcastLog(name, "Stopping container...")
 	stopStart := time.Now()
 	if err := s.client.StopAndRemoveContainer(ctx, target, 30*time.Second); err != nil {
@@ -355,6 +405,16 @@ func (s *Server) performContainerUpdate(name string) {
 		Duration:  time.Since(startTime),
 		SessionID: sessionID,
 	})
+
+	// Clean up old dangling image to prevent orphaned/tagless images in Portainer.
+	if oldImageID != "" && newImage != oldImageID {
+		s.events.BroadcastLog(name, "Cleaning up old image...")
+		if err := s.client.RemoveImageByID(ctx, oldImageID, imageName); err != nil {
+			s.events.BroadcastLog(name, "Image cleanup skipped: "+err.Error())
+		} else {
+			s.events.BroadcastLog(name, "Old image cleaned up")
+		}
+	}
 }
 
 // handleRollbackContainer reverts a container to its previous image.
@@ -421,7 +481,10 @@ func (s *Server) handleRollbackContainer(w http.ResponseWriter, r *http.Request,
 		}
 
 		s.events.BroadcastLog(name, "Starting previous version: "+prevImage)
-		newID, err := s.client.StartContainer(ctx, target)
+
+		// Wrap the target so StartContainer uses the previous image.
+		wrapped := &rollbackContainer{Container: target, overrideImage: prevImage}
+		newID, err := s.client.StartContainer(ctx, wrapped)
 		if err != nil {
 			s.events.BroadcastLog(name, "Failed to start: "+err.Error())
 			s.events.Broadcast(Event{Type: EventUpdateFailed, Container: name, Message: "Start failed"})
@@ -800,6 +863,21 @@ func (s *Server) runAutoCheck(ctx context.Context) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
+			// Skip containers that are currently being updated.
+			s.updatingMu.Lock()
+			updating := s.updating[containers[i].Name]
+			s.updatingMu.Unlock()
+			if updating {
+				results <- result{index: i, err: "update in progress"}
+				return
+			}
+
+			// Skip containers updated within the cooldown window.
+			if s.state.WasRecentlyUpdated(containers[i].Name, postUpdateCooldown) {
+				results <- result{index: i} // treat as up-to-date
+				return
+			}
+
 			dc, ok := dockerByName[containers[i].Name]
 			if !ok {
 				results <- result{index: i, err: "not found in Docker"}
@@ -875,6 +953,16 @@ func (s *Server) runAutoCheck(ctx context.Context) {
 			continue
 		}
 		if isDatabaseImage(d.image) || isSidecarImage(d.image) {
+			continue
+		}
+		// Skip if already being updated or recently updated.
+		s.updatingMu.Lock()
+		updating := s.updating[d.name]
+		s.updatingMu.Unlock()
+		if updating {
+			continue
+		}
+		if s.state.WasRecentlyUpdated(d.name, postUpdateCooldown) {
 			continue
 		}
 		logrus.WithField("container", d.name).Info("Auto-check: triggering auto-update")

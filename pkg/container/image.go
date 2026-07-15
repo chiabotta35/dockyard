@@ -247,13 +247,15 @@ func (c imageClient) RemoveImageByID(ctx context.Context, imageID types.ImageID,
 
 	clog.WithField("notify", "yes").Info("Removing image")
 
-	// Perform image removal with force and pruning.
+	// Perform image removal with force. Do NOT prune children —
+	// PruneChildren removes intermediate images that share layers,
+	// which can delete tagged images unrelated to the old container.
 	items, err := c.api.ImageRemove(
 		ctx,
 		string(imageID),
 		dockerClient.ImageRemoveOptions{
 			Force:         true,
-			PruneChildren: true,
+			PruneChildren: false,
 		},
 	)
 	if err != nil {
