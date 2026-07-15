@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,15 @@ type GitHubRelease struct {
 	} `json:"assets"`
 }
 
+type gitTagRef struct {
+	Ref    string `json:"ref"`
+	Object struct {
+		SHA  string `json:"sha"`
+		Type string `json:"type"`
+		URL  string `json:"url"`
+	} `json:"object"`
+}
+
 var (
 	lastUpdateCheck *UpdateInfo
 	lastCheckTime   time.Time
@@ -56,6 +66,34 @@ func normalizeVersion(v string) string {
 	return strings.TrimSpace(strings.TrimPrefix(v, "v"))
 }
 
+// parseVersion parses "0.1.4" into [0, 1, 4] for comparison.
+func parseVersion(v string) []int {
+	v = normalizeVersion(v)
+	parts := strings.Split(v, ".")
+	var nums []int
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return nil
+		}
+		nums = append(nums, n)
+	}
+	return nums
+}
+
+// versionLess returns true if a < b.
+func versionLess(a, b []int) bool {
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if a[i] < b[i] {
+			return true
+		}
+		if a[i] > b[i] {
+			return false
+		}
+	}
+	return len(a) < len(b)
+}
+
 func CheckForUpdate(currentVersion string) (*UpdateInfo, error) {
 	updateCheckMu.Lock()
 	defer updateCheckMu.Unlock()
@@ -64,41 +102,61 @@ func CheckForUpdate(currentVersion string) (*UpdateInfo, error) {
 		return lastUpdateCheck, nil
 	}
 
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", GitHubOwner, GitHubRepo)
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/refs/tags", GitHubOwner, GitHubRepo)
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check GitHub: %w", err)
+		return nil, fmt.Errorf("failed to check GitHub tags: %w", err)
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode == 404 {
-		// No release exists yet — don't cache this; retry on next call.
-		return &UpdateInfo{
-			Available:  false,
-			CurrentVer: currentVersion,
-			LatestVer:  currentVersion,
-		}, nil
-	}
 
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
 	}
 
-	var release GitHubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return nil, fmt.Errorf("failed to parse release: %w", err)
+	var tags []gitTagRef
+	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
+		return nil, fmt.Errorf("failed to parse tags: %w", err)
 	}
 
-	norm := func(v string) string { return strings.TrimSpace(strings.TrimPrefix(v, "v")) }
-	available := norm(release.TagName) != norm(currentVersion) && release.TagName != ""
+	// Collect all v* tags, parse their versions, and find the latest.
+	curVer := parseVersion(currentVersion)
+	var latestTag string
+	var latestVer []int
+
+	for _, t := range tags {
+		tagName := strings.TrimPrefix(t.Ref, "refs/tags/")
+		if !strings.HasPrefix(tagName, "v") {
+			continue
+		}
+		ver := parseVersion(tagName)
+		if ver == nil {
+			continue
+		}
+		if latestVer == nil || versionLess(latestVer, ver) {
+			latestTag = tagName
+			latestVer = ver
+		}
+	}
+
+	if latestTag == "" || latestVer == nil {
+		// No versioned tags found.
+		info := &UpdateInfo{
+			Available:  false,
+			CurrentVer: currentVersion,
+			LatestVer:  currentVersion,
+		}
+		lastUpdateCheck = info
+		lastCheckTime = time.Now()
+		return info, nil
+	}
+
+	available := curVer == nil || versionLess(curVer, latestVer)
 	info := &UpdateInfo{
-		Available:   available,
-		CurrentVer:  currentVersion,
-		LatestVer:   release.TagName,
-		ReleaseURL:  release.HTMLURL,
-		PublishedAt: release.PublishedAt,
-		Body:        release.Body,
+		Available:  available,
+		CurrentVer: currentVersion,
+		LatestVer:  latestTag,
+		ReleaseURL: fmt.Sprintf("https://github.com/%s/%s/releases/tag/%s", GitHubOwner, GitHubRepo, latestTag),
 	}
 
 	lastUpdateCheck = info
