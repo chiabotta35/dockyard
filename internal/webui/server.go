@@ -358,6 +358,21 @@ func (s *Server) Start(ctx context.Context) error {
 
 	logrus.WithField("addr", s.addr).Info("Dockyard web UI starting")
 
+	// Background goroutine: clean up expired old images (kept for rollback).
+	go func() {
+		time.Sleep(30 * time.Second) // let startup settle
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.cleanupExpiredImages(ctx)
+			}
+		}
+	}()
+
 	// Auto-check on startup after a short delay (gives containers time to register).
 	go func() {
 		time.Sleep(10 * time.Second)

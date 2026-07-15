@@ -150,6 +150,19 @@
                             <option value="168" {{if eq .Settings.BackupWindowHours 168}}selected{{end}}>1 week</option>
                         </select>
                     </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Old Image Retention</label>
+                        <select name="image_retention_hrs" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-dock-500 focus:border-dock-500">
+                            <option value="1" {{if eq .Settings.ImageRetentionHrs 1}}selected{{end}}>1 hour</option>
+                            <option value="6" {{if eq .Settings.ImageRetentionHrs 6}}selected{{end}}>6 hours</option>
+                            <option value="12" {{if eq .Settings.ImageRetentionHrs 12}}selected{{end}}>12 hours</option>
+                            <option value="24" {{if or (eq .Settings.ImageRetentionHrs 24) (eq .Settings.ImageRetentionHrs 0)}}selected{{end}}>24 hours (default)</option>
+                            <option value="48" {{if eq .Settings.ImageRetentionHrs 48}}selected{{end}}>2 days</option>
+                            <option value="72" {{if eq .Settings.ImageRetentionHrs 72}}selected{{end}}>3 days</option>
+                            <option value="168" {{if eq .Settings.ImageRetentionHrs 168}}selected{{end}}>1 week</option>
+                        </select>
+                        <div class="text-xs text-gray-500 mt-1">How long to keep the previous image after an update (for rollback)</div>
+                    </div>
                 </div>
             </div>
 
@@ -369,7 +382,8 @@
                 rolling_restart: false,
                 lifecycle_hooks: false,
                 notification_url: form.notification_url.value,
-                update_on_start: false
+                update_on_start: false,
+                image_retention_hrs: parseInt(form.image_retention_hrs.value) || 24
             };
 
             fetch('/api/settings', {

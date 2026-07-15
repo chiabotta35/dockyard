@@ -406,13 +406,32 @@ func (s *Server) performContainerUpdate(name string) {
 		SessionID: sessionID,
 	})
 
-	// Clean up old dangling image to prevent orphaned/tagless images in Portainer.
+	// Schedule old image cleanup instead of deleting immediately.
+	// The old image is kept for rollback until the retention period expires.
 	if oldImageID != "" && newImage != oldImageID {
-		s.events.BroadcastLog(name, "Cleaning up old image...")
-		if err := s.client.RemoveImageByID(ctx, oldImageID, imageName); err != nil {
-			s.events.BroadcastLog(name, "Image cleanup skipped: "+err.Error())
+		s.state.ScheduleImageCleanup(name, string(oldImageID), imageName)
+		s.events.BroadcastLog(name, fmt.Sprintf("Old image kept for rollback (expires in %s)", s.state.GetImageRetention()))
+	}
+}
+
+// cleanupExpiredImages removes old images that have exceeded the retention period.
+func (s *Server) cleanupExpiredImages(ctx context.Context) {
+	expired := s.state.GetExpiredImageCleanups()
+	if len(expired) == 0 {
+		return
+	}
+	logrus.WithField("count", len(expired)).Info("Cleaning up expired rollback images")
+	for _, img := range expired {
+		s.events.BroadcastLog(img.Name, "Rollback retention expired, cleaning up old image...")
+		if err := s.client.RemoveImageByID(ctx, types.ImageID(img.ImageID), img.Image); err != nil {
+			logrus.WithError(err).WithField("container", img.Name).Warn("Failed to clean up expired image")
+			s.events.BroadcastLog(img.Name, "Image cleanup failed: "+err.Error())
 		} else {
-			s.events.BroadcastLog(name, "Old image cleaned up")
+			logrus.WithField("container", img.Name).Info("Expired rollback image cleaned up")
+			s.events.BroadcastLog(img.Name, "Old image cleaned up (retention expired)")
+		}
+		if err := s.state.ConsumeImageCleanup(img.Name); err != nil {
+			logrus.WithError(err).WithField("container", img.Name).Warn("Failed to clear cleanup tracking")
 		}
 	}
 }
@@ -562,6 +581,9 @@ func (s *Server) handleAPISettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if settings.BackupWindowHours < 1 || settings.BackupWindowHours > 720 {
 			settings.BackupWindowHours = 24
+		}
+		if settings.ImageRetentionHrs < 0 || settings.ImageRetentionHrs > 720 {
+			settings.ImageRetentionHrs = 24
 		}
 		if err := s.state.UpdateSettings(func(curr *Settings) {
 			*curr = settings
