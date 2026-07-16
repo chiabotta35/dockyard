@@ -793,13 +793,13 @@ func (s *Server) handleAPICheckNow(w http.ResponseWriter, r *http.Request) {
 			failed++
 			s.events.BroadcastLog(containers[res.index].Name, "Check failed: "+res.err)
 			logrus.WithField("container", containers[res.index].Name).Warn("Staleness check failed: ", res.err)
-			details = append(details, checkDetail{name: containers[res.index].Name, image: containers[res.index].Image, errMsg: res.err, isSelf: containers[res.index].IsSelf})
+			details = append(details, checkDetail{name: containers[res.index].Name, image: containers[res.index].Image, errMsg: res.err, isSelf: containers[res.index].IsSelf, changelogURL: containers[res.index].ChangelogURL})
 			s.state.SaveCheckResult(containers[res.index].Name, false, res.err, "")
 		} else if res.stale {
 			containers[res.index].Stale = true
 			stale++
 			s.events.BroadcastLog(containers[res.index].Name, "Update available")
-			details = append(details, checkDetail{name: containers[res.index].Name, image: containers[res.index].Image, stale: true, isSelf: containers[res.index].IsSelf})
+			details = append(details, checkDetail{name: containers[res.index].Name, image: containers[res.index].Image, stale: true, isSelf: containers[res.index].IsSelf, changelogURL: containers[res.index].ChangelogURL})
 			s.state.SaveCheckResult(containers[res.index].Name, true, "", "")
 			s.state.MarkUpdateDetected(containers[res.index].Name)
 		} else {
@@ -861,6 +861,9 @@ func (s *Server) sendCheckNotification(updates, errors, upToDate, total int, det
 				s.state.MarkMentioned(d.name)
 				msgParts = append(msgParts, fmt.Sprintf("  \u2022 **%s**", d.name))
 				msgParts = append(msgParts, fmt.Sprintf("    Image: `%s`", d.image))
+				if d.changelogURL != "" {
+					msgParts = append(msgParts, fmt.Sprintf("    Release Notes: %s", d.changelogURL))
+				}
 			}
 		}
 		msgParts = append(msgParts, "")
@@ -893,11 +896,12 @@ func (s *Server) sendCheckNotification(updates, errors, upToDate, total int, det
 }
 
 type checkDetail struct {
-	name   string
-	image  string
-	stale  bool
-	errMsg string
-	isSelf bool
+	name        string
+	image       string
+	stale       bool
+	errMsg      string
+	isSelf      bool
+	changelogURL string
 }
 
 // convertDiscordURL auto-converts Discord webhook URLs to shoutrrr format.
@@ -1033,11 +1037,11 @@ func (s *Server) runAutoCheck(ctx context.Context) {
 	for res := range results {
 		if res.err != "" {
 			failed++
-			details = append(details, checkDetail{name: containers[res.index].Name, image: containers[res.index].Image, errMsg: res.err, isSelf: containers[res.index].IsSelf})
+			details = append(details, checkDetail{name: containers[res.index].Name, image: containers[res.index].Image, errMsg: res.err, isSelf: containers[res.index].IsSelf, changelogURL: containers[res.index].ChangelogURL})
 			s.state.SaveCheckResult(containers[res.index].Name, false, res.err, "")
 		} else if res.stale {
 			stale++
-			details = append(details, checkDetail{name: containers[res.index].Name, image: containers[res.index].Image, stale: true, isSelf: containers[res.index].IsSelf})
+			details = append(details, checkDetail{name: containers[res.index].Name, image: containers[res.index].Image, stale: true, isSelf: containers[res.index].IsSelf, changelogURL: containers[res.index].ChangelogURL})
 			s.state.SaveCheckResult(containers[res.index].Name, true, "", "")
 			s.state.MarkUpdateDetected(containers[res.index].Name)
 		} else {

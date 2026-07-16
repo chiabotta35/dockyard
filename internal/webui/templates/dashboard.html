@@ -66,6 +66,7 @@
                     <span>&#8635;</span>
                     <span id="self-update-text">Update Dockyard</span>
                 </button>
+                <a id="self-update-release" href="#" target="_blank" rel="noopener" class="hidden text-xs text-dock-400 hover:text-dock-300 border border-dock-500/30 px-3 py-2 rounded-lg">Release Notes &#8599;</a>
                 <button onclick="checkAll()" id="check-btn" class="bg-dock-600 hover:bg-dock-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
                     <span id="check-spinner" class="hidden animate-spin">&#8635;</span>
                     <span>Check Now</span>
@@ -302,7 +303,7 @@
                 + (c.is_deferred ? '<div><div class="text-xs text-gray-500">Deferred Until</div><div class="text-sm text-purple-400">' + esc(c.defer_until) + '</div></div>' : '')
                 + (c.check_error ? '<div class="col-span-2 bg-red-500/10 border border-red-500/30 rounded-lg p-2"><div class="text-xs text-red-400">Staleness check failed</div><div class="text-xs text-gray-400 mt-1 font-mono">' + esc(c.check_error) + '</div></div>' : '')
                 + (vs === 'ok' ? '<div class="col-span-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-2"><div class="text-xs text-emerald-400">Image is up to date</div></div>' : '')
-                + (c.latest_image && c.stale ? '<div class="col-span-2 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2"><div class="text-xs text-amber-400">Update available</div><div class="text-xs text-gray-400 mt-1 font-mono">' + esc(c.latest_image) + '</div></div>' : '')
+                + (c.latest_image && c.stale ? '<div class="col-span-2 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2"><div class="text-xs text-amber-400">Update available</div><div class="text-xs text-gray-400 mt-1 font-mono">' + esc(c.latest_image) + (c.changelog_url ? '</div><a href="' + esc(c.changelog_url) + '" target="_blank" rel="noopener" class="text-xs text-dock-400 hover:text-dock-300 mt-1 inline-block" onclick="event.stopPropagation()">Release Notes &#8599;</a>' : '</div>') + '</div>' : '')
                 + (c.checked_at ? '<div><div class="text-xs text-gray-500">Last Checked</div><div class="text-sm text-gray-300">' + new Date(c.checked_at).toLocaleString() + '</div></div>' : '')
                 + (c.has_previous_image ? '<div class="col-span-2"><div class="text-xs text-gray-500">Previous Image</div><div class="text-sm font-mono text-amber-400">' + esc(c.previous_image) + '</div></div>' : '')
                 + (c.is_self ? '<div class="col-span-2 bg-blue-500/10 border border-blue-500/30 rounded-lg p-2"><div class="text-xs text-blue-400">This is Dockyard. Updating starts a replacement first, then stops this one.</div></div>' : '')
@@ -955,6 +956,14 @@
                         btn.classList.remove('hidden');
                         document.getElementById('self-update-text').textContent = 'Update to ' + esc(data.latest_version);
                         btn.title = data.body ? data.body.substring(0, 200) : 'Update available';
+                        if (data.release_url) {
+                            btn.title = data.release_url;
+                            var link = document.getElementById('self-update-release');
+                            if (link) {
+                                link.href = data.release_url;
+                                link.classList.remove('hidden');
+                            }
+                        }
                     }
                 })
                 .catch(function() {});
