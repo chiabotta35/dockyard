@@ -841,7 +841,7 @@
         eventSource.onopen = function() {
             sseReconnects++;
             if (sseReconnects > 1) {
-                location.reload();
+                refreshContainers(true);
             }
         };
 
@@ -882,7 +882,11 @@
         });
 
         eventSource.addEventListener('scan_complete', function(e) {
-            location.reload();
+            // Only reload if we're actively scanning (button disabled by scan_started).
+            // History replay on SSE reconnect sends scan_complete too — skip those.
+            if (document.getElementById('check-btn').disabled) {
+                location.reload();
+            }
         });
 
         // Initial load
