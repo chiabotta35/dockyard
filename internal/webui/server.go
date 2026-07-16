@@ -85,8 +85,6 @@ type ContainerInfo struct {
 
 var dbImagePatterns = regexp.MustCompile(`(?i)^(mysql|mariadb|postgres(?:ql)?|mongo(?:db)?|redis|memcached|influxdb|timescaledb|cockroach(?:db)?|cassandra|elasticsearch|opensearch|clickhouse|neo4j|couchdb|valkey|keydb|scylladb|mssql|percona|tidb|planetscale|dragonflydb|ferretdb)`)
 
-var sidecarImagePatterns = regexp.MustCompile(`(?i)(tika|gotenberg|pdfjs|libreoffice|chromium|wkhtmltopdf|collabora|onlyoffice|embedder|exiftool|ghostscript|imgproxy|pdfcpu|qpdf|poppler|pandoc)`)
-
 func isDatabaseImage(image string) bool {
 	repo := image
 	if idx := strings.Index(image, ":"); idx != -1 {
@@ -96,17 +94,6 @@ func isDatabaseImage(image string) bool {
 		repo = repo[idx+1:]
 	}
 	return dbImagePatterns.MatchString(repo)
-}
-
-func isSidecarImage(image string) bool {
-	repo := image
-	if idx := strings.Index(image, ":"); idx != -1 {
-		repo = image[:idx]
-	}
-	if idx := strings.LastIndex(repo, "/"); idx != -1 {
-		repo = repo[idx+1:]
-	}
-	return sidecarImagePatterns.MatchString(repo)
 }
 
 var versionFromTagRe = regexp.MustCompile(`^(?:v)?(\d+\.\d+(?:\.\d+)?)`)

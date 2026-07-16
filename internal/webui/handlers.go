@@ -1115,7 +1115,16 @@ func (s *Server) runAutoCheck(ctx context.Context) {
 		if s.state.IsDeferred(d.name) {
 			continue
 		}
-		if isDatabaseImage(d.image) || isSidecarImage(d.image) {
+		skip := isDatabaseImage(d.image)
+		if !skip {
+			for _, c := range containers {
+				if c.Name == d.name {
+					skip = c.IsSidecar || c.IsDatabase
+					break
+				}
+			}
+		}
+		if skip {
 			continue
 		}
 		// Skip if already being updated or recently updated.
