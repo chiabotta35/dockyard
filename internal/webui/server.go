@@ -173,6 +173,16 @@ func inferChangelogURL(imageName string, labels map[string]string) string {
 		repo = repo[:idx]
 	}
 
+	// Strip well-known registry prefixes to normalize Docker Hub references.
+	// e.g. "docker.io/prom/prometheus" → "prom/prometheus"
+	//      "docker.io/library/redis" → "redis"
+	if strings.HasPrefix(repo, "docker.io/") {
+		repo = strings.TrimPrefix(repo, "docker.io/")
+	}
+	if strings.HasPrefix(repo, "library/") {
+		repo = strings.TrimPrefix(repo, "library/")
+	}
+
 	// GHCR: always GitHub releases.
 	if strings.HasPrefix(repo, "ghcr.io/") {
 		parts := strings.SplitN(strings.TrimPrefix(repo, "ghcr.io/"), "/", 2)
