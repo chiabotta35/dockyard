@@ -148,6 +148,63 @@ func versionFromLabels(labels map[string]string) string {
 	return ""
 }
 
+// inferChangelogURL tries to derive a release/changelog URL for an image by
+// checking OCI labels, then falling back to well-known URL patterns.
+func inferChangelogURL(imageName string, labels map[string]string) string {
+	// 1. Explicit changelog label (Watchtower convention).
+	if labels != nil {
+		if u, ok := labels["com.centurylinklabs.watchtower.changelog-url"]; ok && u != "" {
+			return u
+		}
+	}
+	// 2. OCI source label → GitHub/GitLab releases.
+	if labels != nil {
+		for _, key := range []string{"org.opencontainers.image.source", "org.label-schema.vcs-url"} {
+			if src, ok := labels[key]; ok && src != "" {
+				if u := sourceToReleasesURL(src); u != "" {
+					return u
+				}
+			}
+		}
+	}
+	// 3. Docker Hub images → link to the Hub page.
+	repo := imageName
+	if idx := strings.Index(repo, ":"); idx != -1 {
+		repo = repo[:idx]
+	}
+	if !strings.Contains(repo, "/") {
+		// Official Docker Hub library image (e.g. "nginx").
+		return "https://hub.docker.com/_/" + repo + "/tags"
+	}
+	if strings.HasPrefix(repo, "ghcr.io/") {
+		// GHCR: try to derive GitHub repo path.
+		parts := strings.SplitN(strings.TrimPrefix(repo, "ghcr.io/"), "/", 2)
+		if len(parts) == 2 {
+			return "https://github.com/" + parts[0] + "/" + parts[1] + "/releases"
+		}
+		return ""
+	}
+	// Docker Hub user/repo.
+	return "https://hub.docker.com/r/" + repo + "/tags"
+}
+
+func sourceToReleasesURL(src string) string {
+	src = strings.TrimSuffix(src, ".git")
+	if strings.Contains(src, "github.com") {
+		parts := strings.Split(strings.TrimPrefix(src, "https://"), "/")
+		if len(parts) >= 3 {
+			return "https://github.com/" + parts[1] + "/" + parts[2] + "/releases"
+		}
+	}
+	if strings.Contains(src, "gitlab.com") {
+		parts := strings.Split(strings.TrimPrefix(src, "https://"), "/")
+		if len(parts) >= 3 {
+			return "https://gitlab.com/" + parts[1] + "/" + parts[2] + "/-/releases"
+		}
+	}
+	return ""
+}
+
 func NewServer(state *State, events *EventHub, auth *AuthStore, client container.Client, filter types.Filter, addr, version string) *Server {
 	logrus.WithFields(logrus.Fields{
 		"version": version,
@@ -645,12 +702,14 @@ func (s *Server) buildContainerList(containers []types.Container) []ContainerInf
 		name := c.Name()
 		cs := s.state.GetContainerState(name)
 
-		// Auto-populate ChangelogURL from Docker label if not manually set.
+		// Auto-populate ChangelogURL if not manually set.
 		changelogURL := cs.ChangelogURL
 		if changelogURL == "" {
-			if ci := c.ContainerInfo(); ci != nil && ci.Config != nil && ci.Config.Labels != nil {
-				changelogURL = ci.Config.Labels["com.centurylinklabs.watchtower.changelog-url"]
+			var labels map[string]string
+			if ci := c.ContainerInfo(); ci != nil && ci.Config != nil {
+				labels = ci.Config.Labels
 			}
+			changelogURL = inferChangelogURL(c.ImageName(), labels)
 		}
 
 		ci := ContainerInfo{

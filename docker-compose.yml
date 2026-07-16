@@ -3,7 +3,7 @@ services:
     build:
       context: .
       args:
-        DOCKYARD_VERSION: v0.1.24
+        DOCKYARD_VERSION: v0.1.25
     container_name: dockyard
     restart: unless-stopped
     ports:

@@ -247,7 +247,13 @@
             var stateBadge = c.state === 'running' ? '<span class="text-xs text-emerald-400">&#9679; running</span>' : '<span class="text-xs text-red-400">&#9679; stopped</span>';
 
             var statusBadge = '';
-            if (vs === 'stale') statusBadge = '<span class="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-medium">Update available</span>';
+            if (vs === 'stale') {
+                if (c.changelog_url) {
+                    statusBadge = '<a href="' + esc(c.changelog_url) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-medium hover:bg-amber-500/30 cursor-pointer" title="View release notes">Update available &#8599;</a>';
+                } else {
+                    statusBadge = '<span class="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-medium">Update available</span>';
+                }
+            }
             else if (vs === 'ok') statusBadge = '<span class="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full">Up to date</span>';
             else if (vs === 'error') statusBadge = '<span class="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full" title="' + esc(c.check_error) + '">Check failed</span>';
 
