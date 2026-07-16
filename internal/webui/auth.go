@@ -42,6 +42,13 @@ type AuthStore struct {
 	isHTTPS  bool
 }
 
+// authFile is the JSON-serializable representation of AuthStore.
+// Exported fields are needed because json.Marshal cannot see unexported ones.
+type authFile struct {
+	Users    map[string]*User    `json:"users"`
+	Sessions map[string]*Session `json:"sessions"`
+}
+
 func NewAuthStore(dataDir string) *AuthStore {
 	logrus.WithField("dataDir", dataDir).Info("Initializing auth store")
 	a := &AuthStore{
@@ -115,16 +122,33 @@ func (a *AuthStore) load() {
 		logrus.WithField("filePath", a.filePath).Debug("No existing auth file found, starting fresh")
 		return
 	}
+	var f authFile
+	if err := json.Unmarshal(data, &f); err != nil {
+		logrus.WithError(err).Warn("Failed to parse auth file, starting fresh")
+		return
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	json.Unmarshal(data, a)
-	logrus.WithField("users", len(a.users)).Debug("Loaded auth data from disk")
+	if f.Users != nil {
+		a.users = f.Users
+	}
+	if f.Sessions != nil {
+		a.sessions = f.Sessions
+	}
+	logrus.WithFields(logrus.Fields{
+		"users":    len(a.users),
+		"sessions": len(a.sessions),
+	}).Debug("Loaded auth data from disk")
 }
 
 func (a *AuthStore) save() error {
 	a.mu.RLock()
-	data, err := json.MarshalIndent(a, "", "  ")
+	f := authFile{
+		Users:    a.users,
+		Sessions: a.sessions,
+	}
 	a.mu.RUnlock()
+	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
 	}

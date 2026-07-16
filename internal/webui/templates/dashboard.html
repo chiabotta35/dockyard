@@ -790,8 +790,15 @@
             if (!force && isLoading) return;
             isLoading = true;
             fetch('/api/containers')
-                .then(function(r) { return r.json(); })
+                .then(function(r) {
+                    if (r.redirected || r.status === 302 || r.status === 301) {
+                        window.location.href = r.url || '/login';
+                        return null;
+                    }
+                    return r.json();
+                })
                 .then(function(data) {
+                    if (!data) return;
                     containers = data;
                     // Initialize checked map from persisted state
                     containers.forEach(function(c) {
