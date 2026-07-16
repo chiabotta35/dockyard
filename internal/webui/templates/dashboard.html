@@ -781,8 +781,8 @@
         var lastHash = '';
         var isLoading = false;
 
-        function refreshContainers() {
-            if (isLoading) return;
+        function refreshContainers(force) {
+            if (!force && isLoading) return;
             isLoading = true;
             fetch('/api/containers')
                 .then(function(r) { return r.json(); })
@@ -834,21 +834,11 @@
 
         eventSource.addEventListener('update_complete', function(e) {
             var data = JSON.parse(e.data);
-            var name = data.container;
-            addLog(name, 'Update complete');
+            addLog(data.container, 'Update complete');
             updateDone++;
             updateProgress();
-            fetch('/api/containers').then(function(r) { return r.json(); }).then(function(allContainers) {
-                containers = allContainers;
-                checked[name] = 'ok';
-                var c = containers.find(function(x) { return x.name === name; });
-                if (c) {
-                    c.stale = false;
-                    c.check_error = '';
-                }
-                updateCardVisualState(name);
-                updateStats();
-            });
+            checked[data.container] = 'ok';
+            refreshContainers(true);
         });
 
         eventSource.addEventListener('update_failed', function(e) {
@@ -857,11 +847,7 @@
             checked[data.container] = 'error';
             updateDone++;
             updateProgress();
-            fetch('/api/containers').then(function(r) { return r.json(); }).then(function(allContainers) {
-                containers = allContainers;
-                updateCardVisualState(data.container);
-                updateStats();
-            });
+            refreshContainers(true);
         });
 
         eventSource.addEventListener('scan_started', function(e) {
@@ -873,7 +859,7 @@
         eventSource.addEventListener('scan_complete', function(e) {
             document.getElementById('check-btn').disabled = false;
             document.getElementById('check-spinner').classList.add('hidden');
-            refreshContainers();
+            refreshContainers(true);
         });
 
         // Initial load
