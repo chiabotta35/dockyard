@@ -773,6 +773,16 @@ func (s *Server) handleAPICheckNow(w http.ResponseWriter, r *http.Request) {
 	s.events.Broadcast(Event{Type: EventScanComplete, Message: msg})
 	s.events.BroadcastLog("", msg)
 
+	// Check self container separately for notification (hidden from dashboard grid).
+	if s.selfContainerID != "" {
+		selfInfo, err := CheckForUpdate(s.version)
+		if err == nil && selfInfo.Available {
+			stale++
+			details = append(details, checkDetail{name: "dockyard", image: "ghcr.io/" + GitHubOwner + "/" + GitHubRepo + ":" + selfInfo.LatestVer, stale: true, isSelf: true, changelogURL: selfInfo.ReleaseURL})
+			s.state.SetChangelogURL("dockyard", selfInfo.ReleaseURL)
+		}
+	}
+
 	// Send notification if there are updates or errors.
 	s.sendCheckNotification(stale, failed, upToDate, toCheck, details)
 
@@ -1008,6 +1018,16 @@ func (s *Server) runAutoCheck(ctx context.Context) {
 			upToDate++
 			s.state.SaveCheckResult(containers[res.index].Name, false, "", "")
 			s.state.ClearUpdateDetected(containers[res.index].Name)
+		}
+	}
+
+	// Check self container separately for notification (hidden from dashboard grid).
+	if s.selfContainerID != "" {
+		selfInfo, err := CheckForUpdate(s.version)
+		if err == nil && selfInfo.Available {
+			stale++
+			details = append(details, checkDetail{name: "dockyard", image: "ghcr.io/" + GitHubOwner + "/" + GitHubRepo + ":" + selfInfo.LatestVer, stale: true, isSelf: true, changelogURL: selfInfo.ReleaseURL})
+			s.state.SetChangelogURL("dockyard", selfInfo.ReleaseURL)
 		}
 	}
 

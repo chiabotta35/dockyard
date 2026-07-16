@@ -592,13 +592,21 @@ func (s *Server) buildContainerList(containers []types.Container) []ContainerInf
 		name := c.Name()
 		cs := s.state.GetContainerState(name)
 
+		// Auto-populate ChangelogURL from Docker label if not manually set.
+		changelogURL := cs.ChangelogURL
+		if changelogURL == "" {
+			if ci := c.ContainerInfo(); ci != nil && ci.Config != nil && ci.Config.Labels != nil {
+				changelogURL = ci.Config.Labels["com.centurylinklabs.watchtower.changelog-url"]
+			}
+		}
+
 		ci := ContainerInfo{
 			Name:         name,
 			Image:        c.ImageName(),
 			Stale:        c.IsStale() || cs.IsStale,
 			UpdateMode:   string(cs.UpdateMode),
 			IsDeferred:   s.state.IsDeferred(name),
-			ChangelogURL: cs.ChangelogURL,
+			ChangelogURL: changelogURL,
 			ImageID:      string(c.ImageID()),
 			IsSelf:       s.selfContainerID != "" && string(c.ID()) == s.selfContainerID,
 			IsDatabase:   isDatabaseImage(c.ImageName()),
