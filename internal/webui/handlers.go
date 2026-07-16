@@ -1370,3 +1370,69 @@ func (s *Server) handleAPICheckStatus(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, resp)
 }
+
+// handleAPIDebugContainers returns raw Docker API container data + processed list for debugging.
+func (s *Server) handleAPIDebugContainers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, "method not allowed", 405)
+		return
+	}
+
+	ctx := context.Background()
+	rawContainers, err := s.client.ListContainers(ctx)
+	if err != nil {
+		s.writeError(w, "ListContainers failed: "+err.Error(), 500)
+		return
+	}
+
+	type rawInfo struct {
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		Image   string `json:"image"`
+		Running bool   `json:"running"`
+	}
+
+	type processedInfo struct {
+		rawInfo
+		InResult bool   `json:"in_result"`
+		Error    string `json:"error,omitempty"`
+	}
+
+	raw := make([]rawInfo, len(rawContainers))
+	for i, c := range rawContainers {
+		raw[i] = rawInfo{
+			ID:      string(c.ID()),
+			Name:    c.Name(),
+			Image:   c.ImageName(),
+			Running: c.IsRunning(),
+		}
+	}
+
+	processed := s.buildContainerList(rawContainers)
+	processedMap := make(map[string]bool, len(processed))
+	for _, p := range processed {
+		processedMap[p.Name] = true
+	}
+
+	pi := make([]processedInfo, len(rawContainers))
+	for i, c := range rawContainers {
+		name := c.Name()
+		pi[i] = processedInfo{
+			rawInfo: rawInfo{
+				ID:      string(c.ID()),
+				Name:    name,
+				Image:   c.ImageName(),
+				Running: c.IsRunning(),
+			},
+			InResult: processedMap[name],
+		}
+	}
+
+	s.writeJSON(w, map[string]interface{}{
+		"self_container_id": s.selfContainerID,
+		"raw_count":         len(rawContainers),
+		"processed_count":   len(processed),
+		"raw":               raw,
+		"processed":         pi,
+	})
+}

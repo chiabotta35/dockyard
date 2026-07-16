@@ -423,6 +423,7 @@ func (s *Server) Start(ctx context.Context) error {
 	protected.HandleFunc("/api/logs", s.handleAPILogs)
 	protected.HandleFunc("/api/auto-check-status", s.handleAPICheckStatus)
 	protected.HandleFunc("/api/user/change-password", limitRequestBody(s.handleAPIChangePassword))
+	protected.HandleFunc("/api/debug/containers", s.handleAPIDebugContainers)
 	logrus.Debug("Registered protected page and API routes")
 
 	mux.Handle("/", securityHeaders(s.auth.AuthMiddleware(protected.ServeHTTP)))
@@ -749,6 +750,15 @@ func (s *Server) getContainerList() []ContainerInfo {
 		logrus.WithError(err).Error("Failed to list containers")
 		return nil
 	}
+	names := make([]string, len(containers))
+	for i, c := range containers {
+		names[i] = c.Name()
+	}
+	logrus.WithFields(logrus.Fields{
+		"count":   len(containers),
+		"names":   names,
+		"self_id": s.selfContainerID,
+	}).Info("Docker container list")
 	return s.buildContainerList(containers)
 }
 
@@ -759,83 +769,95 @@ func (s *Server) getContainerList() []ContainerInfo {
 func (s *Server) buildContainerList(containers []types.Container) []ContainerInfo {
 	result := make([]ContainerInfo, 0, len(containers))
 	for _, c := range containers {
-		// Hide the self container — it's managed via the self-update button,
-		// not the regular container list.
-		if s.selfContainerID != "" && string(c.ID()) == s.selfContainerID {
-			continue
-		}
+		// Per-container panic recovery so one broken container can't crash the list.
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logrus.WithFields(logrus.Fields{
+						"container": c.Name(),
+						"panic":     r,
+					}).Error("Panic processing container in buildContainerList")
+				}
+			}()
 
-		name := c.Name()
-		cs := s.state.GetContainerState(name)
-
-		// Auto-populate ChangelogURL if not manually set.
-		changelogURL := cs.ChangelogURL
-		if changelogURL == "" {
-			var labels map[string]string
-			if ci := c.ContainerInfo(); ci != nil && ci.Config != nil {
-				labels = ci.Config.Labels
-			}
-			changelogURL = inferChangelogURL(c.ImageName(), labels)
-		}
-
-		ci := ContainerInfo{
-			Name:           name,
-			Image:          c.ImageName(),
-			Stale:          c.IsStale() || cs.IsStale,
-			UpdateMode:     string(cs.UpdateMode),
-			IsDeferred:     s.state.IsDeferred(name),
-			ChangelogURL:   changelogURL,
-			ImageID:        string(c.ImageID()),
-			IsSelf:         s.selfContainerID != "" && string(c.ID()) == s.selfContainerID,
-			IsDatabase:     isDatabaseImage(c.ImageName()),
-			IsSidecar:      isSidecarImage(c.ImageName()),
-			CheckError:     cs.CheckError,
-			LatestImage:    cs.LatestImage,
-			CurrentVersion: parseImageVersion(c.ImageName()),
-			LatestVersion:  cs.LatestVersion,
-		}
-
-		if ci.CurrentVersion == "" {
-			if ci2 := c.ContainerInfo(); ci2 != nil && ci2.Config != nil {
-				ci.CurrentVersion = versionFromLabels(ci2.Config.Labels)
-			}
-		}
-
-		if cs.CheckedAt != nil {
-			ci.CheckedAt = cs.CheckedAt.Format(time.RFC3339)
-		}
-
-		if cs.PreviousImage != "" {
-			ci.HasPreviousImage = true
-			ci.PreviousImage = cs.PreviousImage
-		}
-
-		if cs.DeferUntil != nil {
-			ci.DeferUntil = cs.DeferUntil.Format("2006-01-02 15:04")
-		}
-
-		if c.IsRunning() {
-			ci.State = "running"
-		} else {
-			ci.State = "stopped"
-		}
-
-		ci.Labels = make(map[string]string)
-		if inspect := c.ContainerInfo(); inspect != nil {
-			if inspect.Config != nil && inspect.Config.Labels != nil {
-				ci.Labels = inspect.Config.Labels
-				ci.ComposeStack = inspect.Config.Labels["com.docker.compose.project"]
+			// Hide the self container — it's managed via the self-update button,
+			// not the regular container list.
+			if s.selfContainerID != "" && string(c.ID()) == s.selfContainerID {
+				return
 			}
 
-			if inspect.HostConfig != nil {
-				for port := range inspect.HostConfig.PortBindings {
-					ci.Ports += port.Port() + "/" + string(port.Proto()) + " "
+			name := c.Name()
+			cs := s.state.GetContainerState(name)
+
+			// Auto-populate ChangelogURL if not manually set.
+			changelogURL := cs.ChangelogURL
+			if changelogURL == "" {
+				var labels map[string]string
+				if ci := c.ContainerInfo(); ci != nil && ci.Config != nil {
+					labels = ci.Config.Labels
+				}
+				changelogURL = inferChangelogURL(c.ImageName(), labels)
+			}
+
+			ci := ContainerInfo{
+				Name:           name,
+				Image:          c.ImageName(),
+				Stale:          c.IsStale() || cs.IsStale,
+				UpdateMode:     string(cs.UpdateMode),
+				IsDeferred:     s.state.IsDeferred(name),
+				ChangelogURL:   changelogURL,
+				ImageID:        string(c.ImageID()),
+				IsSelf:         s.selfContainerID != "" && string(c.ID()) == s.selfContainerID,
+				IsDatabase:     isDatabaseImage(c.ImageName()),
+				IsSidecar:      isSidecarImage(c.ImageName()),
+				CheckError:     cs.CheckError,
+				LatestImage:    cs.LatestImage,
+				CurrentVersion: parseImageVersion(c.ImageName()),
+				LatestVersion:  cs.LatestVersion,
+			}
+
+			if ci.CurrentVersion == "" {
+				if ci2 := c.ContainerInfo(); ci2 != nil && ci2.Config != nil {
+					ci.CurrentVersion = versionFromLabels(ci2.Config.Labels)
 				}
 			}
-		}
 
-		ci.Ports = strings.TrimSpace(ci.Ports)
-		result = append(result, ci)
+			if cs.CheckedAt != nil {
+				ci.CheckedAt = cs.CheckedAt.Format(time.RFC3339)
+			}
+
+			if cs.PreviousImage != "" {
+				ci.HasPreviousImage = true
+				ci.PreviousImage = cs.PreviousImage
+			}
+
+			if cs.DeferUntil != nil {
+				ci.DeferUntil = cs.DeferUntil.Format("2006-01-02 15:04")
+			}
+
+			if c.IsRunning() {
+				ci.State = "running"
+			} else {
+				ci.State = "stopped"
+			}
+
+			ci.Labels = make(map[string]string)
+			if inspect := c.ContainerInfo(); inspect != nil {
+				if inspect.Config != nil && inspect.Config.Labels != nil {
+					ci.Labels = inspect.Config.Labels
+					ci.ComposeStack = inspect.Config.Labels["com.docker.compose.project"]
+				}
+
+				if inspect.HostConfig != nil {
+					for port := range inspect.HostConfig.PortBindings {
+						ci.Ports += port.Port() + "/" + string(port.Proto()) + " "
+					}
+				}
+			}
+
+			ci.Ports = strings.TrimSpace(ci.Ports)
+			result = append(result, ci)
+		}()
 	}
 	return result
 }
