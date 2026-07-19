@@ -279,6 +279,7 @@
             }
             if (c.has_previous_image) {
                 actionBtns += '<button onclick="event.stopPropagation(); rollbackContainer(\'' + n + '\')" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors" title="Rollback">Rollback</button>';
+                actionBtns += '<button onclick="event.stopPropagation(); clearOldImage(\'' + n + '\')" class="bg-gray-800 hover:bg-gray-700 text-gray-400 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors" title="Remove old image, rollback will no longer be available">Discard</button>';
             }
 
 
@@ -681,6 +682,14 @@
                 var ch = document.getElementById('chevron-' + name);
                 if (ch) ch.classList.add('open');
             });
+        };
+
+        window.clearOldImage = function(name) {
+            if (!confirm('Remove old image for ' + name + '? Rollback will no longer be available.')) return;
+            fetch('/api/containers/' + name + '/clear-image', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            }).then(function() { refreshContainers(); });
         };
 
         window.deferContainer = function(name, days) {

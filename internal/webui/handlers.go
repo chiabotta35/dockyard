@@ -117,6 +117,8 @@ func (s *Server) handleAPIContainerAction(w http.ResponseWriter, r *http.Request
 		s.handleSetChangelog(w, r, name)
 	case "rollback":
 		s.handleRollbackContainer(w, r, name)
+	case "clear-image":
+		s.handleClearOldImage(w, r, name)
 	case "check":
 		s.handleCheckContainer(w, r, name)
 	case "role":
@@ -577,6 +579,32 @@ func (s *Server) handleRollbackContainer(w http.ResponseWriter, r *http.Request,
 	}()
 
 	s.writeJSON(w, map[string]string{"status": "ok", "message": "rollback started", "target_image": prevImage})
+}
+
+func (s *Server) handleClearOldImage(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, "method not allowed", 405)
+		return
+	}
+
+	prevImage, prevImageID, hasPrevious := s.state.GetPreviousImage(name)
+	if !hasPrevious {
+		s.writeError(w, "no previous image to remove", 400)
+		return
+	}
+
+	ctx := context.Background()
+	s.events.BroadcastLog(name, "Removing old image: "+prevImage)
+
+	if err := s.client.RemoveImageByID(ctx, types.ImageID(prevImageID), prevImage); err != nil {
+		s.events.BroadcastLog(name, "Failed to remove old image: "+err.Error())
+		s.writeError(w, err.Error(), 500)
+		return
+	}
+
+	s.state.ClearPreviousImage(name)
+	s.events.BroadcastLog(name, "Old image removed — rollback no longer available")
+	s.writeJSON(w, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleSetChangelog(w http.ResponseWriter, r *http.Request, name string) {
