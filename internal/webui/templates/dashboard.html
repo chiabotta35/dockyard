@@ -31,6 +31,17 @@
     </style>
 </head>
 <body class="bg-gray-950 text-gray-100 min-h-screen">
+    <div id="restart-overlay" class="hidden fixed inset-0 z-[100] bg-gray-950/95 flex items-center justify-center">
+        <div class="text-center max-w-md mx-auto px-6">
+            <div class="animate-spin w-12 h-12 border-4 border-dock-500 border-t-transparent rounded-full mx-auto mb-6"></div>
+            <h2 class="text-xl font-bold mb-2">Updating Dockyard</h2>
+            <p class="text-gray-400 mb-4" id="restart-msg">Restarting in <span id="restart-countdown" class="text-white font-mono font-bold">10</span>s</p>
+            <div class="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
+                <div id="restart-progress-bar" class="h-full bg-dock-500 rounded-full transition-all duration-1000" style="width: 100%"></div>
+            </div>
+            <p class="text-xs text-gray-600 mt-4">This page will reconnect automatically</p>
+        </div>
+    </div>
     <nav class="bg-gray-900 border-b border-gray-800 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-14">
@@ -889,6 +900,13 @@
             setTimeout(function() { isReplay = false; }, 2000);
             sseReconnects++;
             if (sseReconnects > 1) {
+                var overlay = document.getElementById('restart-overlay');
+                if (!overlay.classList.contains('hidden')) {
+                    document.getElementById('restart-msg').innerHTML = 'Update complete!';
+                    document.getElementById('restart-countdown').textContent = '';
+                    document.getElementById('restart-progress-bar').style.width = '0%';
+                    setTimeout(function() { overlay.classList.add('hidden'); }, 2000);
+                }
                 refreshContainers(true);
             }
         };
@@ -935,6 +953,37 @@
             document.getElementById('check-spinner').classList.add('hidden');
             if (!isReplay) refreshContainers(true);
         });
+
+        eventSource.addEventListener('self_update', function(e) {
+            if (isReplay) return;
+            var data = JSON.parse(e.data);
+            showRestartBanner(data.message || 'Updating...');
+        });
+
+        var restartBannerShown = false;
+        function showRestartBanner(msg) {
+            if (restartBannerShown) return;
+            restartBannerShown = true;
+            var overlay = document.getElementById('restart-overlay');
+            overlay.classList.remove('hidden');
+            var countdown = 10;
+            var el = document.getElementById('restart-countdown');
+            var bar = document.getElementById('restart-progress-bar');
+            el.textContent = countdown;
+            bar.style.width = '100%';
+            var timer = setInterval(function() {
+                countdown--;
+                if (countdown <= 0) {
+                    clearInterval(timer);
+                    el.textContent = '0';
+                    bar.style.width = '0%';
+                    document.getElementById('restart-msg').innerHTML = 'Restarting now&hellip;';
+                    return;
+                }
+                el.textContent = countdown;
+                bar.style.width = (countdown / 10 * 100) + '%';
+            }, 1000);
+        }
 
         // Initial load
         refreshContainers();

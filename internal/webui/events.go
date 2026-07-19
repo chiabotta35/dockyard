@@ -17,6 +17,7 @@ const (
 	EventUpdateComplete EventType = "update_complete"
 	EventUpdateFailed   EventType = "update_failed"
 	EventRollback       EventType = "rollback"
+	EventSelfUpdate     EventType = "self_update"
 	EventLogLine        EventType = "log_line"
 )
 

@@ -240,6 +240,12 @@ func (s *Server) performSelfUpdate(ctx context.Context, name string, target type
 	// This avoids port conflicts because the orchestrator is independent of
 	// the old container's lifecycle.
 	s.events.BroadcastLog(name, "Creating ephemeral orchestrator for self-update...")
+	s.events.Broadcast(Event{
+		Type:      EventSelfUpdate,
+		Container: name,
+		Message:   fmt.Sprintf("Updating to %s", updateInfo.LatestVer),
+		Data:      map[string]string{"version": updateInfo.LatestVer},
+	})
 	_, err := s.client.CreateEphemeralOrchestrator(ctx, target, newImageRef, "")
 	if err != nil {
 		s.events.BroadcastLog(name, "Failed to create orchestrator: "+err.Error())
