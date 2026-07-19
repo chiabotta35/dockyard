@@ -721,9 +721,13 @@
         };
 
         window.clearOldImage = function(name, index) {
+            var c = containers.find(function(x) { return x.name === name; });
             var body = {};
-            if (typeof index === 'number' && index >= 0) {
-                body.index = index;
+            if (typeof index === 'number' && index >= 0 && c && c.previous_images && c.previous_images[index]) {
+                body.image = c.previous_images[index].image;
+                body.image_id = c.previous_images[index].image_id;
+            } else {
+                body.all = true;
             }
             if (!confirm('Remove old image(s) for ' + name + '? Rollback will no longer be available.')) return;
             fetch('/api/containers/' + name + '/clear-image', {
