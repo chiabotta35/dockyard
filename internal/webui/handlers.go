@@ -582,24 +582,6 @@ func (s *Server) handleRollbackContainer(w http.ResponseWriter, r *http.Request,
 	s.writeJSON(w, map[string]string{"status": "ok", "message": "rollback started", "target_image": prevImage})
 }
 
-func (s *Server) handleAPIPurgeOldImages(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, "method not allowed", 405)
-		return
-	}
-	ctx := context.Background()
-	removed := s.state.PurgeExpiredImages()
-	var errors []string
-	for _, ri := range removed {
-		s.BroadcastLog(ri.Name, "Auto-purging old image: "+ri.Image)
-		if err := s.client.RemoveImageByID(ctx, types.ImageID(ri.ImageID), ri.Image); err != nil {
-			s.BroadcastLog(ri.Name, "Failed to remove: "+err.Error())
-			errors = append(errors, err.Error())
-		}
-	}
-	s.writeJSON(w, map[string]interface{}{"purged": len(removed), "errors": errors})
-}
-
 func (s *Server) handleClearOldImage(w http.ResponseWriter, r *http.Request, name string) {
 	if r.Method != http.MethodPost {
 		s.writeError(w, "method not allowed", 405)

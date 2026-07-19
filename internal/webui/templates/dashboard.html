@@ -95,7 +95,6 @@
                     <span id="check-spinner" class="hidden animate-spin">&#8635;</span>
                     <span>Check Now</span>
                 </button>
-                <button onclick="purgeOldImages()" class="bg-gray-800 hover:bg-gray-700 text-gray-400 px-3 py-2 rounded-lg text-sm font-medium transition-colors" title="Remove expired old images based on retention setting">Purge Old</button>
             </div>
         </div>
 
@@ -736,17 +735,6 @@
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(body)
             }).then(function() { refreshContainers(); });
-        };
-
-        window.purgeOldImages = function() {
-            if (!confirm('Purge expired old images?')) return;
-            fetch('/api/purge-old-images', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'}
-            }).then(function(r) { return r.json(); }).then(function(data) {
-                alert('Purged ' + (data.purged || 0) + ' old image(s)' + (data.errors && data.errors.length ? '. Errors: ' + data.errors.join(', ') : ''));
-                refreshContainers();
-            });
         };
 
         window.deferContainer = function(name, days) {
