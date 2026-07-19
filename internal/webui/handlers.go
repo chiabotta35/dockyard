@@ -881,16 +881,9 @@ func (s *Server) handleAPICheckNow(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			// For the self container, prefer GitHub version check.
-			// Fall back to digest comparison if GitHub is unreachable.
+			// Self container is handled after the loop to avoid duplicate entries.
 			if containers[i].IsSelf {
-				updateInfo, err := CheckForUpdate(s.version)
-				if err != nil {
-					logrus.WithField("container", containers[i].Name).Debug("GitHub version check failed, falling back to digest: ", err)
-				} else {
-					results <- result{index: i, stale: updateInfo.Available}
-					return
-				}
+				return
 			}
 
 			isStale, _, err := s.client.IsContainerStale(ctx, dc, types.UpdateParams{})
@@ -947,13 +940,23 @@ func (s *Server) handleAPICheckNow(w http.ResponseWriter, r *http.Request) {
 	s.events.Broadcast(Event{Type: EventScanComplete, Message: msg})
 	s.events.BroadcastLog("", msg)
 
-	// Check self container separately for notification (hidden from dashboard grid).
+	// Check self container separately (excluded from parallel loop to avoid duplicates).
 	if s.selfContainerID != "" {
 		selfInfo, err := CheckForUpdate(s.version)
-		if err == nil && selfInfo.Available {
+		if err != nil {
+			logrus.Debug("Self update check failed: ", err)
+			s.state.SaveCheckResult("dockyard", false, err.Error(), "")
+		} else if selfInfo.Available {
 			stale++
 			details = append(details, checkDetail{name: "dockyard", image: "ghcr.io/" + GitHubOwner + "/" + GitHubRepo + ":" + selfInfo.LatestVer, stale: true, isSelf: true, changelogURL: selfInfo.ReleaseURL})
+			s.state.SaveCheckResult("dockyard", true, "", "")
+			s.state.MarkUpdateDetected("dockyard")
 			s.state.SetChangelogURL("dockyard", selfInfo.ReleaseURL)
+		} else {
+			upToDate++
+			s.state.SaveCheckResult("dockyard", false, "", "")
+			s.state.ClearUpdateDetected("dockyard")
+			s.state.SaveLatestVersion("dockyard", "")
 		}
 	}
 
@@ -1145,16 +1148,9 @@ func (s *Server) runAutoCheck(ctx context.Context) {
 				return
 			}
 
-			// For the self container, prefer GitHub version check.
-			// Fall back to digest comparison if GitHub is unreachable.
+			// Self container is handled after the loop to avoid duplicate entries.
 			if containers[i].IsSelf {
-				updateInfo, err := CheckForUpdate(s.version)
-				if err != nil {
-					logrus.WithField("container", containers[i].Name).Debug("GitHub version check failed, falling back to digest: ", err)
-				} else {
-					results <- result{index: i, stale: updateInfo.Available}
-					return
-				}
+				return
 			}
 
 			isStale, _, err := s.client.IsContainerStale(ctx, dc, types.UpdateParams{})
@@ -1200,13 +1196,23 @@ func (s *Server) runAutoCheck(ctx context.Context) {
 		}
 	}
 
-	// Check self container separately for notification (hidden from dashboard grid).
+	// Check self container separately (excluded from parallel loop to avoid duplicates).
 	if s.selfContainerID != "" {
 		selfInfo, err := CheckForUpdate(s.version)
-		if err == nil && selfInfo.Available {
+		if err != nil {
+			logrus.Debug("Self update check failed: ", err)
+			s.state.SaveCheckResult("dockyard", false, err.Error(), "")
+		} else if selfInfo.Available {
 			stale++
 			details = append(details, checkDetail{name: "dockyard", image: "ghcr.io/" + GitHubOwner + "/" + GitHubRepo + ":" + selfInfo.LatestVer, stale: true, isSelf: true, changelogURL: selfInfo.ReleaseURL})
+			s.state.SaveCheckResult("dockyard", true, "", "")
+			s.state.MarkUpdateDetected("dockyard")
 			s.state.SetChangelogURL("dockyard", selfInfo.ReleaseURL)
+		} else {
+			upToDate++
+			s.state.SaveCheckResult("dockyard", false, "", "")
+			s.state.ClearUpdateDetected("dockyard")
+			s.state.SaveLatestVersion("dockyard", "")
 		}
 	}
 
