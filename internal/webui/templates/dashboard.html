@@ -60,6 +60,24 @@
         </div>
     </nav>
 
+    <div id="self-update-banner" class="hidden sticky top-14 z-40 bg-amber-500/10 border-b border-amber-500/30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <span class="text-amber-400 text-lg">&#9888;</span>
+                    <div>
+                        <span class="text-sm font-medium text-amber-300">Dockyard update available: <span id="banner-update-version" class="text-amber-200"></span></span>
+                        <span id="banner-release-link" class="hidden ml-3"><a href="#" target="_blank" rel="noopener" class="text-xs text-amber-400 hover:text-amber-300 underline">Release Notes &#8599;</a></span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="deferSelfUpdate()" class="text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 px-2 py-1 rounded">Defer</button>
+                    <button onclick="selfUpdate()" id="banner-update-btn" class="bg-amber-500 hover:bg-amber-600 text-gray-900 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors">Update Now</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <div class="flex items-center justify-between mb-6">
             <div>
@@ -80,21 +98,7 @@
             </div>
         </div>
 
-        <div id="self-update-banner" class="hidden mb-6 bg-dock-900/40 border border-dock-500/40 rounded-xl p-4">
-            <div class="flex items-center justify-between">
-                <div class="flex items-center gap-3">
-                    <span class="text-dock-400 text-lg">&#8635;</span>
-                    <div>
-                        <div class="text-sm font-medium text-white">Dockyard update available: <span id="banner-update-version" class="text-dock-400"></span></div>
-                        <div id="banner-release-link" class="hidden"><a href="#" target="_blank" rel="noopener" class="text-xs text-dock-400 hover:text-dock-300">Release Notes &#8599;</a></div>
-                    </div>
-                </div>
-                <div class="flex items-center gap-2">
-                    <button onclick="selfUpdate()" id="banner-update-btn" class="bg-dock-600 hover:bg-dock-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors">Update Now</button>
-                    <button onclick="document.getElementById('self-update-banner').classList.add('hidden')" class="text-gray-500 hover:text-gray-300 px-2 py-1.5 text-sm" title="Dismiss">&times;</button>
-                </div>
-            </div>
-        </div>
+
 
         <div class="grid grid-cols-6 gap-4 mb-4">
             <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
@@ -292,7 +296,7 @@
             if (c.update_mode !== 'ignore') {
                 actionBtns += '<button onclick="event.stopPropagation(); checkSingle(\'' + n + '\')" id="check-btn-' + n + '" class="bg-gray-700 hover:bg-gray-600 text-white px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" title="Check for updates">Check</button>';
             }
-            if (vs === 'stale' && !c.is_self && c.update_mode !== 'ignore') {
+            if (vs === 'stale' && c.update_mode !== 'ignore') {
                 actionBtns += '<button onclick="event.stopPropagation(); triggerUpdate(\'' + n + '\')" class="bg-dock-600 hover:bg-dock-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">Update</button>';
             }
 
@@ -1122,6 +1126,8 @@
 
         // Check for Dockyard self-updates
         function refreshSelfUpdate() {
+            var deferred = parseInt(localStorage.getItem('dockyard_defer_update') || '0', 10);
+            if (deferred > Date.now()) return;
             fetch('/api/update/check')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
@@ -1142,6 +1148,11 @@
         }
         refreshSelfUpdate();
         setInterval(refreshSelfUpdate, 5 * 60 * 1000);
+
+        window.deferSelfUpdate = function() {
+            localStorage.setItem('dockyard_defer_update', String(Date.now() + 7 * 24 * 60 * 60 * 1000));
+            document.getElementById('self-update-banner').classList.add('hidden');
+        };
     })();
     </script>
 </body>
