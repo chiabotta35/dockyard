@@ -186,31 +186,12 @@
                 </div>
             </div>
 
-            <!-- Backup & Rollback -->
+            <!-- Rollback Image Retention -->
             <div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <h2 class="text-lg font-semibold mb-4">Backup &amp; Rollback</h2>
+                <h2 class="text-lg font-semibold mb-4">Rollback</h2>
                 <div class="space-y-4">
-                    <label class="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg cursor-pointer">
-                        <div>
-                            <div class="text-sm font-medium">Backup Old Containers</div>
-                            <div class="text-xs text-gray-500">Keep old containers after updates for easy rollback</div>
-                        </div>
-                        <input type="checkbox" name="backup_retention" {{if .Settings.BackupRetention}}checked{{end}} class="w-4 h-4 text-dock-500 bg-gray-700 border-gray-600 rounded focus:ring-dock-500">
-                    </label>
                     <div>
-                        <label class="block text-sm font-medium text-gray-400 mb-1">Keep Backups For</label>
-                        <select name="backup_window_hours" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-dock-500 focus:border-dock-500">
-                            <option value="1" {{if eq .Settings.BackupWindowHours 1}}selected{{end}}>1 hour</option>
-                            <option value="6" {{if eq .Settings.BackupWindowHours 6}}selected{{end}}>6 hours</option>
-                            <option value="12" {{if eq .Settings.BackupWindowHours 12}}selected{{end}}>12 hours</option>
-                            <option value="24" {{if eq .Settings.BackupWindowHours 24}}selected{{end}}>24 hours (default)</option>
-                            <option value="48" {{if eq .Settings.BackupWindowHours 48}}selected{{end}}>2 days</option>
-                            <option value="72" {{if eq .Settings.BackupWindowHours 72}}selected{{end}}>3 days</option>
-                            <option value="168" {{if eq .Settings.BackupWindowHours 168}}selected{{end}}>1 week</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-400 mb-1">Old Image Retention</label>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Keep Old Images For</label>
                         <select name="image_retention_hrs" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-dock-500 focus:border-dock-500">
                             <option value="0" {{if eq .Settings.ImageRetentionHrs 0}}selected{{end}}>Keep forever</option>
                             <option value="1" {{if eq .Settings.ImageRetentionHrs 1}}selected{{end}}>1 minute</option>
@@ -220,6 +201,8 @@
                             <option value="360" {{if eq .Settings.ImageRetentionHrs 360}}selected{{end}}>6 hours</option>
                             <option value="1440" {{if or (eq .Settings.ImageRetentionHrs 1440) (eq .Settings.ImageRetentionHrs 0)}}selected{{end}}>24 hours</option>
                             <option value="10080" {{if eq .Settings.ImageRetentionHrs 10080}}selected{{end}}>1 week</option>
+                        </select>
+                        <div class="text-xs text-gray-500 mt-1">How long to keep old images after updates for rollback. Expired images are auto-purged.</div>
                         </select>
                         <div class="text-xs text-gray-500 mt-1">How long to keep old images after updates. "Keep forever" disables auto-purge.</div>
                     </div>
@@ -436,8 +419,6 @@
                 cleanup: true,
                 cooldown_delay: form.cooldown_delay.value,
                 stop_timeout: form.stop_timeout.value,
-                backup_retention: form.backup_retention.checked,
-                backup_window_hours: parseInt(form.backup_window_hours.value) || 24,
                 monitor_only: false,
                 rolling_restart: false,
                 lifecycle_hooks: false,

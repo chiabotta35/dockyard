@@ -737,9 +737,6 @@ func (s *Server) handleAPISettings(w http.ResponseWriter, r *http.Request) {
 			s.writeError(w, "invalid request body", 400)
 			return
 		}
-		if settings.BackupWindowHours < 1 || settings.BackupWindowHours > 720 {
-			settings.BackupWindowHours = 24
-		}
 		if settings.ImageRetentionHrs < 0 || settings.ImageRetentionHrs > 10080 {
 			settings.ImageRetentionHrs = 1440
 		}

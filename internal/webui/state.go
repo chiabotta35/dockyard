@@ -49,8 +49,6 @@ type Settings struct {
 	Cleanup           bool   `json:"cleanup"`
 	CooldownDelay     string `json:"cooldown_delay"`
 	StopTimeout       string `json:"stop_timeout"`
-	BackupRetention   bool   `json:"backup_retention"`
-	BackupWindowHours int    `json:"backup_window_hours"`
 	MonitorOnly       bool   `json:"monitor_only"`
 	RollingRestart    bool   `json:"rolling_restart"`
 	LifecycleHooks    bool   `json:"lifecycle_hooks"`
@@ -102,8 +100,6 @@ func NewState(dataDir string) *State {
 			Cleanup:           true,
 			CooldownDelay:     "0s",
 			StopTimeout:       "30s",
-			BackupRetention:   false,
-			BackupWindowHours: 24,
 			MonitorOnly:       false,
 			RollingRestart:    false,
 			LifecycleHooks:    false,
@@ -177,18 +173,6 @@ func (s *State) loadFromEnv() {
 	if v := os.Getenv("DOCKYARD_UPDATE_ON_START"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			s.Settings.UpdateOnStart = b
-			changed = true
-		}
-	}
-	if v := os.Getenv("DOCKYARD_BACKUP_RETENTION"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			s.Settings.BackupRetention = b
-			changed = true
-		}
-	}
-	if v := os.Getenv("DOCKYARD_BACKUP_WINDOW_HOURS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 720 {
-			s.Settings.BackupWindowHours = n
 			changed = true
 		}
 	}
