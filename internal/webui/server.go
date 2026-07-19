@@ -526,6 +526,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Background goroutine: purge expired old images based on retention setting.
 	go func() {
+		s.autoCheckMu.Lock()
+		s.lastPurge = time.Now()
+		s.autoCheckMu.Unlock()
 		time.Sleep(30 * time.Second)
 		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()

@@ -597,23 +597,35 @@ func (s *Server) handleClearOldImage(w http.ResponseWriter, r *http.Request, nam
 		return
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	if req.All {
-		// Remove all previous images.
+		removed := 0
 		for _, pi := range prevImages {
+			if pi.Pinned {
+				s.events.BroadcastLog(name, "Skipping pinned image: "+pi.Image)
+				continue
+			}
 			s.events.BroadcastLog(name, "Removing old image: "+pi.Image)
 			if err := s.client.RemoveImageByID(ctx, types.ImageID(pi.ImageID), pi.Image); err != nil {
 				s.events.BroadcastLog(name, "Failed to remove: "+err.Error())
 			}
+			removed++
 		}
-		s.state.ClearPreviousImages(name)
-		s.events.BroadcastLog(name, "All old images removed — rollback no longer available")
+		s.state.ClearUnpinnedPreviousImages(name)
+		if removed > 0 {
+			s.events.BroadcastLog(name, fmt.Sprintf("Removed %d old image(s)", removed))
+		}
 	} else {
 		// Remove a specific image from the list.
-		removed := false
+		found := false
 		for i, pi := range prevImages {
 			if pi.Image == req.Image || (req.ImageID != "" && pi.ImageID == req.ImageID) {
+				if pi.Pinned {
+					s.writeError(w, "image is pinned, unpin first", 400)
+					return
+				}
 				s.events.BroadcastLog(name, "Removing old image: "+pi.Image)
 				if err := s.client.RemoveImageByID(ctx, types.ImageID(pi.ImageID), pi.Image); err != nil {
 					s.events.BroadcastLog(name, "Failed to remove: "+err.Error())
@@ -621,11 +633,11 @@ func (s *Server) handleClearOldImage(w http.ResponseWriter, r *http.Request, nam
 					return
 				}
 				s.state.RemovePreviousImage(name, i)
-				removed = true
+				found = true
 				break
 			}
 		}
-		if !removed {
+		if !found {
 			s.writeError(w, "image not found in previous images", 400)
 			return
 		}

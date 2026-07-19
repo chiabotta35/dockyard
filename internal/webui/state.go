@@ -413,6 +413,21 @@ func (s *State) ClearPreviousImages(name string) error {
 	return s.save()
 }
 
+func (s *State) ClearUnpinnedPreviousImages(name string) error {
+	s.mu.Lock()
+	if cs, ok := s.Containers[name]; ok {
+		var kept []PreviousImageEntry
+		for _, pi := range cs.PreviousImages {
+			if pi.Pinned {
+				kept = append(kept, pi)
+			}
+		}
+		s.Containers[name].PreviousImages = kept
+	}
+	s.mu.Unlock()
+	return s.save()
+}
+
 func (s *State) RemovePreviousImage(name string, index int) error {
 	s.mu.Lock()
 	if cs, ok := s.Containers[name]; ok && index >= 0 && index < len(cs.PreviousImages) {
@@ -445,9 +460,9 @@ func (s *State) GetImageRetention() time.Duration {
 // Returns a list of {name, image} entries that were removed.
 func (s *State) PurgeExpiredImages() []ExpiredImage {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	retention := s.getSettingsLocked().ImageRetentionHours()
 	if retention <= 0 {
+		s.mu.Unlock()
 		return nil
 	}
 	cutoff := time.Now().Add(-retention)
@@ -468,6 +483,7 @@ func (s *State) PurgeExpiredImages() []ExpiredImage {
 			s.Containers[name].PreviousImages = kept
 		}
 	}
+	s.mu.Unlock()
 	if len(removed) > 0 {
 		s.save()
 	}
