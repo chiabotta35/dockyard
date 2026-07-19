@@ -634,6 +634,103 @@ func (s *Server) handleClearOldImage(w http.ResponseWriter, r *http.Request, nam
 	s.writeJSON(w, map[string]string{"status": "ok"})
 }
 
+func (s *Server) handleAPISelfStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, "method not allowed", 405)
+		return
+	}
+
+	info, err := CheckForUpdate(s.version)
+	if err != nil {
+		info = &UpdateInfo{CurrentVer: s.version, LatestVer: s.version}
+	}
+
+	prevImages := s.state.GetPreviousImages("dockyard")
+
+	resp := map[string]interface{}{
+		"version":        s.version,
+		"update_info":    info,
+		"previous_images": prevImages,
+		"container_id":   s.selfContainerID,
+	}
+	s.writeJSON(w, resp)
+}
+
+func (s *Server) handleAPISelfRollback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, "method not allowed", 405)
+		return
+	}
+
+	if s.selfContainerID == "" {
+		s.writeError(w, "self container not detected", 400)
+		return
+	}
+
+	var req struct {
+		Index int `json:"index"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, "invalid request body", 400)
+		return
+	}
+
+	prevImages := s.state.GetPreviousImages("dockyard")
+	if req.Index < 0 || req.Index >= len(prevImages) {
+		s.writeError(w, "invalid image index", 400)
+		return
+	}
+
+	target := prevImages[req.Index]
+
+	ctx := context.Background()
+	dockerContainers, err := s.client.ListContainers(ctx)
+	if err != nil {
+		s.writeError(w, "failed to list containers: "+err.Error(), 500)
+		return
+	}
+
+	for _, dc := range dockerContainers {
+		if string(dc.ID()) == s.selfContainerID {
+			s.events.BroadcastLog("dockyard", "Rolling back to: "+target.Image)
+			go func() {
+				sessionID := s.state.StartSession("dockyard")
+				defer s.state.EndSession("dockyard")
+				startTime := time.Now()
+
+				if err := s.client.StopContainer(ctx, dc, 30*time.Second); err != nil {
+					s.events.BroadcastLog("dockyard", "Stop failed: "+err.Error())
+					s.events.Broadcast(Event{Type: EventUpdateFailed, Container: "dockyard", Message: "Rollback failed"})
+					return
+				}
+				s.events.BroadcastLog("dockyard", "Container stopped, starting with old image...")
+
+				if _, err := s.client.StartContainer(ctx, dc); err != nil {
+					s.events.BroadcastLog("dockyard", "Start failed: "+err.Error())
+					s.events.Broadcast(Event{Type: EventUpdateFailed, Container: "dockyard", Message: "Rollback failed"})
+					return
+				}
+
+				elapsed := time.Since(startTime).Truncate(time.Millisecond)
+				s.events.BroadcastLog("dockyard", fmt.Sprintf("Rollback complete (%s) — container is restarting", elapsed))
+				s.events.Broadcast(Event{Type: EventUpdateComplete, Container: "dockyard", Message: "Rolled back"})
+				s.state.AddHistory(HistoryEntry{
+					Container: "dockyard",
+					Timestamp: time.Now(),
+					Status:    "success",
+					Duration:  time.Since(startTime),
+					SessionID: sessionID,
+				})
+			}()
+
+			s.writeJSON(w, map[string]string{"status": "ok", "message": "rollback started", "target_image": target.Image})
+			return
+		}
+	}
+
+	s.writeError(w, "self container not found", 404)
+}
+
 func (s *Server) handleSetChangelog(w http.ResponseWriter, r *http.Request, name string) {
 	if r.Method != http.MethodPost {
 		s.writeError(w, "method not allowed", 405)

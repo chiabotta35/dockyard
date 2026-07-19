@@ -231,6 +231,38 @@
                 </div>
             </div>
 
+            <!-- Dockyard -->
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                <h2 class="text-lg font-semibold mb-4">Dockyard</h2>
+                <div class="space-y-4">
+                    <div class="flex items-center gap-4">
+                        <div>
+                            <div class="text-xs text-gray-500">Current Version</div>
+                            <div id="self-version" class="text-sm font-mono text-white">loading...</div>
+                        </div>
+                        <div id="self-update-info" class="hidden">
+                            <div class="text-xs text-gray-500">Update Available</div>
+                            <div class="text-sm font-mono text-amber-400" id="self-latest-version"></div>
+                        </div>
+                        <div id="self-release-link" class="hidden">
+                            <a href="#" target="_blank" rel="noopener" class="text-xs text-dock-400 hover:text-dock-300 underline">Release Notes &#8599;</a>
+                        </div>
+                        <div class="ml-auto flex gap-2">
+                            <button onclick="selfCheckUpdate()" id="self-check-btn" class="bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">Check</button>
+                            <button onclick="selfUpdateFromSettings()" id="self-update-btn" class="hidden bg-amber-500 hover:bg-amber-600 text-gray-900 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors">Update</button>
+                        </div>
+                    </div>
+                    <div id="self-rollback-section" class="hidden">
+                        <div class="text-xs text-gray-500 mb-1">Rollback to Previous Version</div>
+                        <div class="flex items-center gap-2">
+                            <select id="self-rollback-sel" class="flex-1 bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg px-2 py-1">
+                            </select>
+                            <button onclick="selfRollback()" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors">Rollback</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="flex justify-end">
                 <button type="submit" class="bg-dock-600 hover:bg-dock-700 text-white px-6 py-2 rounded-lg text-sm font-medium transition-colors">
                     Save Settings
@@ -432,6 +464,88 @@
                 setTimeout(() => toast.classList.add('hidden'), 3000);
             });
         }
+
+        // Dockyard self-management
+        function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+        function refreshSelfStatus() {
+            fetch('/api/self/status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var ver = document.getElementById('self-version');
+                    if (ver) ver.textContent = data.version || 'unknown';
+
+                    var info = data.update_info || {};
+                    var updateEl = document.getElementById('self-update-info');
+                    var latestEl = document.getElementById('self-latest-version');
+                    var releaseEl = document.getElementById('self-release-link');
+                    var updateBtn = document.getElementById('self-update-btn');
+
+                    if (info.available) {
+                        updateEl.classList.remove('hidden');
+                        latestEl.textContent = info.latest_version || '';
+                        if (info.release_url) {
+                            releaseEl.querySelector('a').href = info.release_url;
+                            releaseEl.classList.remove('hidden');
+                        }
+                        if (updateBtn) updateBtn.classList.remove('hidden');
+                    } else {
+                        updateEl.classList.add('hidden');
+                        if (updateBtn) updateBtn.classList.add('hidden');
+                    }
+
+                    var prev = data.previous_images || [];
+                    var rollbackSection = document.getElementById('self-rollback-section');
+                    var rollbackSel = document.getElementById('self-rollback-sel');
+                    if (prev.length > 0 && rollbackSection && rollbackSel) {
+                        rollbackSel.innerHTML = prev.map(function(pi, idx) {
+                            var tag = pi.image.split(':').pop() || pi.image.split('/').pop();
+                            var ts = pi.timestamp ? new Date(pi.timestamp).toLocaleString() : 'unknown';
+                            return '<option value="' + idx + '">' + tag + ' (' + ts + ')</option>';
+                        }).join('');
+                        rollbackSection.classList.remove('hidden');
+                    } else if (rollbackSection) {
+                        rollbackSection.classList.add('hidden');
+                    }
+                })
+                .catch(function() {});
+        }
+
+        function selfCheckUpdate() {
+            var btn = document.getElementById('self-check-btn');
+            if (btn) { btn.disabled = true; btn.textContent = 'Checking...'; }
+            fetch('/api/update/check?force=true')
+                .then(function(r) { return r.json(); })
+                .then(function() { refreshSelfStatus(); if (btn) { btn.disabled = false; btn.textContent = 'Check'; } })
+                .catch(function() { if (btn) { btn.disabled = false; btn.textContent = 'Check'; } });
+        }
+
+        function selfUpdateFromSettings() {
+            if (!confirm('Update Dockyard? Container will restart.')) return;
+            var btn = document.getElementById('self-update-btn');
+            if (btn) { btn.disabled = true; btn.textContent = 'Updating...'; }
+            fetch('/api/update/self', { method: 'POST' }).then(function() {}).catch(function() {});
+        }
+
+        function selfRollback() {
+            var sel = document.getElementById('self-rollback-sel');
+            var idx = sel ? parseInt(sel.value) : 0;
+            var target = sel && sel.options[idx] ? sel.options[idx].textContent : 'selected version';
+            if (!confirm('Rollback Dockyard to:\n' + target + '?\nContainer will restart.')) return;
+            fetch('/api/self/rollback', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({index: idx})
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                if (data.status === 'ok') {
+                    var toast = document.getElementById('save-toast');
+                    toast.textContent = 'Rollback started — container is restarting';
+                    toast.classList.remove('hidden');
+                }
+            }).catch(function() {});
+        }
+
+        refreshSelfStatus();
     </script>
 </body>
 </html>

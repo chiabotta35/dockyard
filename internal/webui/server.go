@@ -401,6 +401,8 @@ func (s *Server) Start(ctx context.Context) error {
 	protected.HandleFunc("/api/events", s.handleSSE)
 	protected.HandleFunc("/api/update/check", s.handleAPICheckUpdate)
 	protected.HandleFunc("/api/update/self", s.handleAPISelfUpdate)
+	protected.HandleFunc("/api/self/status", s.handleAPISelfStatus)
+	protected.HandleFunc("/api/self/rollback", s.handleAPISelfRollback)
 	protected.HandleFunc("/api/notifications/test", s.handleAPITestNotification)
 	protected.HandleFunc("/api/logs", s.handleAPILogs)
 	protected.HandleFunc("/api/auto-check-status", s.handleAPICheckStatus)
@@ -777,6 +779,10 @@ func (s *Server) buildContainerList(containers []types.Container) []ContainerInf
 				LatestImage:    cs.LatestImage,
 				CurrentVersion: parseImageVersion(c.ImageName()),
 				LatestVersion:  cs.LatestVersion,
+			}
+
+			if ci.IsSelf {
+				return
 			}
 
 			if ci.CurrentVersion == "" {
