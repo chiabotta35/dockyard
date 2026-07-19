@@ -93,7 +93,7 @@
                 </div>
                 <button onclick="checkAll()" id="check-btn" class="bg-dock-600 hover:bg-dock-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
                     <span id="check-spinner" class="hidden animate-spin">&#8635;</span>
-                    <span>Check Now</span>
+                    <span>Check All</span>
                 </button>
             </div>
         </div>
@@ -693,6 +693,7 @@
                     showToast(name + ': up to date', 'success');
                 }
                 if (btn) { btn.disabled = false; btn.textContent = 'Check'; }
+                refreshSelfUpdate(true);
             }).catch(function() {
                 if (btn) { btn.disabled = false; btn.textContent = 'Check'; }
             });
