@@ -154,7 +154,6 @@
     <div id="status-watermark" class="fixed bottom-0 left-0 right-0 z-40 px-4 py-1.5 bg-gray-950/80 backdrop-blur-md border-t border-gray-800/50 text-[11px] text-gray-600 flex items-center gap-5 select-none">
         <span id="auto-last">Last check: never</span>
         <span id="auto-next" class="hidden">Next check: calculating...</span>
-        <span id="auto-purge" class="hidden"></span>
         <span class="ml-auto" id="auto-interval"></span>
     </div>
 
@@ -336,7 +335,7 @@
                 + (vs === 'ok' ? '<div class="col-span-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-2"><div class="text-xs text-emerald-400">Image is up to date</div></div>' : '')
                 + (c.stale ? '<div class="col-span-2 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2"><div class="text-xs text-amber-400">Update available</div>' + (c.current_version && c.latest_version && c.latest_version !== c.current_version ? '<div class="text-sm font-mono text-amber-300 mt-1">' + esc(c.current_version) + ' &#8594; ' + esc(c.latest_version) + '</div>' : c.latest_image ? '<div class="text-xs text-gray-400 mt-1 font-mono">' + esc(c.latest_image) + '</div>' : '') + (c.changelog_url ? '<a href="' + esc(c.changelog_url) + '" target="_blank" rel="noopener" class="text-xs text-dock-400 hover:text-dock-300 mt-1 inline-block" onclick="event.stopPropagation()">Release Notes &#8599;</a>' : '') + '</div>' : '')
                 + (c.checked_at ? '<div><div class="text-xs text-gray-500">Last Checked</div><div class="text-sm text-gray-300">' + new Date(c.checked_at).toLocaleString() + '</div></div>' : '')
-                + (c.previous_images && c.previous_images.length > 0 ? '<div class="col-span-2"><div class="text-xs text-gray-500 mb-1">Previous Images</div>' + c.previous_images.map(function(pi, idx) { var tag = pi.image.split(':').pop() || pi.image.split('/').pop(); var ts = pi.timestamp ? new Date(pi.timestamp).toLocaleString() : ''; var pinIcon = pi.pinned ? '&#128278;' : ''; return '<div class="flex items-center gap-2 text-sm font-mono text-amber-400 truncate" title="' + esc(pi.image) + ' (' + ts + ')">' + '<button onclick="event.stopPropagation(); togglePinImage(\'' + n + '\', ' + idx + ', ' + !pi.pinned + ')" class="text-xs shrink-0 ' + (pi.pinned ? 'text-amber-400' : 'text-gray-600 hover:text-gray-400') + '" title="' + (pi.pinned ? 'Unpin' : 'Pin to keep') + '">&#128204;</button>' + '<span class="truncate">' + esc(tag) + '</span>' + (pi.pinned ? '<span class="text-amber-400/60 text-[10px] shrink-0">pinned</span>' : '') + '<span class="text-gray-500 text-xs ml-auto shrink-0">' + ts + '</span></div>'; }).join('') + '</div>' : '')
+                + (c.previous_images && c.previous_images.length > 0 ? '<div class="col-span-2"><div class="text-xs text-gray-500 mb-1">Previous Images</div>' + c.previous_images.map(function(pi, idx) { var tag = pi.image.split(':').pop() || pi.image.split('/').pop(); var ts = pi.timestamp ? new Date(pi.timestamp).toLocaleString() : ''; return '<div class="flex items-center gap-2 text-sm font-mono text-amber-400 truncate" title="' + esc(pi.image) + ' (' + ts + ')">' + '<span class="truncate">' + esc(tag) + '</span>' + '<span class="text-gray-500 text-xs ml-auto shrink-0">' + ts + '</span></div>'; }).join('') + '</div>' : '')
                 + (c.is_self ? '<div class="col-span-2 bg-blue-500/10 border border-blue-500/30 rounded-lg p-2"><div class="text-xs text-blue-400">This is Dockyard. Updating starts a replacement first, then stops this one.</div></div>' : '')
                 + '</div>'
                 + '<div class="flex items-center gap-3">'
@@ -366,8 +365,7 @@
                     + c.previous_images.map(function(pi, idx) {
                         var tag = pi.image.split(':').pop() || pi.image.split('/').pop();
                         var ts = pi.timestamp ? new Date(pi.timestamp).toLocaleString() : 'unknown';
-                        var pin = pi.pinned ? ' [pinned]' : '';
-                        return '<option value="' + idx + '">' + tag + ' (' + ts + ')' + pin + '</option>';
+                        return '<option value="' + idx + '">' + tag + ' (' + ts + ')</option>';
                     }).join('')
                     + '</select>'
                     + '<button onclick="rollbackContainerVersion(\'' + n + '\')" class="bg-amber-600 hover:bg-amber-700 text-white px-2 py-1 rounded-lg text-xs font-medium">Rollback</button>'
@@ -731,14 +729,6 @@
             }).then(function() { refreshContainers(); });
         };
 
-        window.togglePinImage = function(name, index, pinned) {
-            fetch('/api/containers/' + name + '/pin-image', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({index: index, pinned: pinned})
-            }).then(function() { refreshContainers(); });
-        };
-
         window.deferContainer = function(name, days) {
             fetch('/api/containers/' + name + '/defer', {
                 method: 'POST',
@@ -1073,7 +1063,6 @@
             var lastEl = document.getElementById('auto-last');
             var nextEl = document.getElementById('auto-next');
             var intervalEl = document.getElementById('auto-interval');
-            var purgeEl = document.getElementById('auto-purge');
 
             if (autoCheckData.last_check) {
                 var ago = Math.round((Date.now() - new Date(autoCheckData.last_check).getTime()) / 1000);
@@ -1098,26 +1087,6 @@
                 nextEl.classList.remove('hidden');
             } else {
                 nextEl.classList.add('hidden');
-            }
-
-            var retentionMin = autoCheckData.image_retention_min || 0;
-            if (retentionMin > 0) {
-                if (autoCheckData.last_purge) {
-                    var nextPurge = new Date(autoCheckData.last_purge).getTime() + 60000;
-                    var remaining = Math.max(0, Math.round((nextPurge - Date.now()) / 1000));
-                    if (remaining <= 0) {
-                        purgeEl.textContent = 'Purge cycle: running';
-                    } else if (remaining < 60) {
-                        purgeEl.textContent = 'Purge in ' + remaining + 's';
-                    } else {
-                        purgeEl.textContent = 'Purge in ' + Math.floor(remaining / 60) + 'm ' + (remaining % 60) + 's';
-                    }
-                } else {
-                    purgeEl.textContent = 'Purge cycle: idle';
-                }
-                purgeEl.classList.remove('hidden');
-            } else {
-                purgeEl.classList.add('hidden');
             }
 
             if (autoCheckData.schedule && autoCheckData.schedule !== '@yearly') {

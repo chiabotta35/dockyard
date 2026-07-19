@@ -42,7 +42,6 @@ type Server struct {
 	lastAutoCheck   time.Time
 	nextAutoCheck   time.Time
 	autoCheckMu     sync.RWMutex
-	lastPurge       time.Time
 	updating        map[string]bool
 	updatingMu      sync.Mutex
 	checkMu         sync.Mutex // prevents concurrent check operations
@@ -523,27 +522,6 @@ func (s *Server) Start(ctx context.Context) error {
 	}()
 
 	logrus.WithField("addr", s.addr).Info("Dockyard web UI starting")
-
-	// Background goroutine: purge expired old images based on retention setting.
-	go func() {
-		s.autoCheckMu.Lock()
-		s.lastPurge = time.Now()
-		s.autoCheckMu.Unlock()
-		time.Sleep(30 * time.Second)
-		ticker := time.NewTicker(60 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				s.purgeExpiredImages()
-				s.autoCheckMu.Lock()
-				s.lastPurge = time.Now()
-				s.autoCheckMu.Unlock()
-			}
-		}
-	}()
 
 	// Auto-check on startup after a short delay (gives containers time to register).
 	go func() {

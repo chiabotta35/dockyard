@@ -191,20 +191,15 @@
                 <h2 class="text-lg font-semibold mb-4">Rollback</h2>
                 <div class="space-y-4">
                     <div>
-                        <label class="block text-sm font-medium text-gray-400 mb-1">Keep Old Images For</label>
-                        <select name="image_retention_hrs" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-dock-500 focus:border-dock-500">
-                            <option value="0" {{if eq .Settings.ImageRetentionHrs 0}}selected{{end}}>Keep forever</option>
-                            <option value="1" {{if eq .Settings.ImageRetentionHrs 1}}selected{{end}}>1 minute</option>
-                            <option value="5" {{if eq .Settings.ImageRetentionHrs 5}}selected{{end}}>5 minutes</option>
-                            <option value="30" {{if eq .Settings.ImageRetentionHrs 30}}selected{{end}}>30 minutes</option>
-                            <option value="60" {{if eq .Settings.ImageRetentionHrs 60}}selected{{end}}>1 hour</option>
-                            <option value="360" {{if eq .Settings.ImageRetentionHrs 360}}selected{{end}}>6 hours</option>
-                            <option value="1440" {{if or (eq .Settings.ImageRetentionHrs 1440) (eq .Settings.ImageRetentionHrs 0)}}selected{{end}}>24 hours</option>
-                            <option value="10080" {{if eq .Settings.ImageRetentionHrs 10080}}selected{{end}}>1 week</option>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Keep Last Old Images</label>
+                        <select name="old_image_count" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-dock-500 focus:border-dock-500">
+                            <option value="1" {{if eq .Settings.OldImageCount 1}}selected{{end}}>1 old image</option>
+                            <option value="2" {{if eq .Settings.OldImageCount 2}}selected{{end}}>2 old images</option>
+                            <option value="3" {{if or (eq .Settings.OldImageCount 3) (eq .Settings.OldImageCount 0)}}selected{{end}}>3 old images</option>
+                            <option value="5" {{if eq .Settings.OldImageCount 5}}selected{{end}}>5 old images</option>
+                            <option value="10" {{if eq .Settings.OldImageCount 10}}selected{{end}}>10 old images</option>
                         </select>
-                        <div class="text-xs text-gray-500 mt-1">How long to keep old images after updates for rollback. Expired images are auto-purged.</div>
-                        </select>
-                        <div class="text-xs text-gray-500 mt-1">How long to keep old images after updates. "Keep forever" disables auto-purge.</div>
+                        <div class="text-xs text-gray-500 mt-1">Number of old images to keep per container for rollback. Older images are auto-removed.</div>
                     </div>
                 </div>
             </div>
@@ -424,7 +419,7 @@
                 lifecycle_hooks: false,
                 notification_url: form.notification_url.value,
                 update_on_start: false,
-                image_retention_hrs: parseInt(form.image_retention_hrs.value) || 24
+                old_image_count: parseInt(form.old_image_count.value) || 3
             };
 
             fetch('/api/settings', {

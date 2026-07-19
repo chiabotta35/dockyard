@@ -25,7 +25,6 @@ type PreviousImageEntry struct {
 	Image     string    `json:"image"`
 	ImageID   string    `json:"image_id"`
 	Timestamp time.Time `json:"timestamp"`
-	Pinned    bool      `json:"pinned,omitempty"`
 }
 
 type ContainerState struct {
@@ -56,6 +55,7 @@ type Settings struct {
 	NotificationURL   string `json:"notification_url"`
 	UpdateOnStart     bool   `json:"update_on_start"`
 	ImageRetentionHrs int    `json:"image_retention_hrs"`
+	OldImageCount     int    `json:"old_image_count"`
 }
 
 type HistoryEntry struct {
@@ -292,13 +292,6 @@ func (s *State) getSettingsLocked() Settings {
 	return s.Settings
 }
 
-func (set Settings) ImageRetentionHours() time.Duration {
-	if set.ImageRetentionHrs <= 0 {
-		return 0
-	}
-	return time.Duration(set.ImageRetentionHrs) * time.Minute
-}
-
 func (s *State) AddHistory(entry HistoryEntry) error {
 	s.mu.Lock()
 	s.History = append([]HistoryEntry{entry}, s.History...)
@@ -393,8 +386,12 @@ func (s *State) SavePreviousImage(name, image, imageID string) error {
 		ImageID:   imageID,
 		Timestamp: time.Now(),
 	}}, cs.PreviousImages...)
-	if len(cs.PreviousImages) > 10 {
-		cs.PreviousImages = cs.PreviousImages[:10]
+	maxKeep := s.Settings.OldImageCount
+	if maxKeep <= 0 {
+		maxKeep = 3
+	}
+	if len(cs.PreviousImages) > maxKeep {
+		cs.PreviousImages = cs.PreviousImages[:maxKeep]
 	}
 	s.mu.Unlock()
 	return s.save()
@@ -421,15 +418,7 @@ func (s *State) ClearPreviousImages(name string) error {
 
 func (s *State) ClearUnpinnedPreviousImages(name string) error {
 	s.mu.Lock()
-	if cs, ok := s.Containers[name]; ok {
-		var kept []PreviousImageEntry
-		for _, pi := range cs.PreviousImages {
-			if pi.Pinned {
-				kept = append(kept, pi)
-			}
-		}
-		s.Containers[name].PreviousImages = kept
-	}
+	s.Containers[name].PreviousImages = nil
 	s.mu.Unlock()
 	return s.save()
 }
@@ -443,50 +432,33 @@ func (s *State) RemovePreviousImage(name string, index int) error {
 	return s.save()
 }
 
-func (s *State) PinPreviousImage(name string, index int, pinned bool) error {
-	s.mu.Lock()
-	if cs, ok := s.Containers[name]; ok && index >= 0 && index < len(cs.PreviousImages) {
-		s.Containers[name].PreviousImages[index].Pinned = pinned
-	}
-	s.mu.Unlock()
-	return s.save()
-}
-
-func (s *State) GetImageRetention() time.Duration {
+func (s *State) GetOldImageCount() int {
 	s.mu.RLock()
-	hours := s.Settings.ImageRetentionHrs
-	s.mu.RUnlock()
-	if hours <= 0 {
-		return 0
+	defer s.mu.RUnlock()
+	n := s.Settings.OldImageCount
+	if n <= 0 {
+		return 3
 	}
-	return time.Duration(hours) * time.Minute
+	return n
 }
 
-// PurgeExpiredImages removes previous images older than the retention window.
-// Returns a list of {name, image} entries that were removed.
-func (s *State) PurgeExpiredImages() []ExpiredImage {
+// TrimPreviousImages enforces the Keep Last N limit.
+// Returns entries that were trimmed (for Docker image cleanup).
+func (s *State) TrimPreviousImages() []ExpiredImage {
 	s.mu.Lock()
-	retention := s.getSettingsLocked().ImageRetentionHours()
-	if retention <= 0 {
-		s.mu.Unlock()
-		return nil
+	maxKeep := s.Settings.OldImageCount
+	if maxKeep <= 0 {
+		maxKeep = 3
 	}
-	cutoff := time.Now().Add(-retention)
 	var removed []ExpiredImage
 	for name, cs := range s.Containers {
-		if len(cs.PreviousImages) == 0 {
+		if len(cs.PreviousImages) <= maxKeep {
 			continue
 		}
-		var kept []PreviousImageEntry
-		for _, pi := range cs.PreviousImages {
-			if !pi.Pinned && pi.Timestamp.Before(cutoff) {
-				removed = append(removed, ExpiredImage{Name: name, ImageID: pi.ImageID, Image: pi.Image, SavedAt: pi.Timestamp})
-			} else {
-				kept = append(kept, pi)
-			}
-		}
-		if len(kept) != len(cs.PreviousImages) {
-			s.Containers[name].PreviousImages = kept
+		trimmed := cs.PreviousImages[maxKeep:]
+		cs.PreviousImages = cs.PreviousImages[:maxKeep]
+		for _, pi := range trimmed {
+			removed = append(removed, ExpiredImage{Name: name, ImageID: pi.ImageID, Image: pi.Image, SavedAt: pi.Timestamp})
 		}
 	}
 	s.mu.Unlock()

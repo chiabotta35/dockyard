@@ -119,8 +119,6 @@ func (s *Server) handleAPIContainerAction(w http.ResponseWriter, r *http.Request
 		s.handleRollbackContainer(w, r, name)
 	case "clear-image":
 		s.handleClearOldImage(w, r, name)
-	case "pin-image":
-		s.handlePinImage(w, r, name)
 	case "check":
 		s.handleCheckContainer(w, r, name)
 	case "role":
@@ -274,6 +272,7 @@ func (s *Server) performSelfUpdate(ctx context.Context, name string, target type
 	// Save old image for rollback.
 	if oldImageID != "" {
 		s.state.SavePreviousImage(name, oldImageName, string(oldImageID))
+		s.trimExpiredImages()
 	}
 }
 
@@ -442,6 +441,7 @@ func (s *Server) performContainerUpdate(name string) {
 	// Save old image for rollback.
 	if oldImageID != "" && newImage != oldImageID {
 		s.state.SavePreviousImage(name, imageName, string(oldImageID))
+		s.trimExpiredImages()
 		s.events.BroadcastLog(name, "Old image saved for rollback")
 	}
 }
@@ -600,10 +600,6 @@ func (s *Server) handleClearOldImage(w http.ResponseWriter, r *http.Request, nam
 	if req.All {
 		removed := 0
 		for _, pi := range prevImages {
-			if pi.Pinned {
-				s.events.BroadcastLog(name, "Skipping pinned image: "+pi.Image)
-				continue
-			}
 			s.events.BroadcastLog(name, "Removing old image: "+pi.Image)
 			if err := s.client.RemoveImageByID(ctx, types.ImageID(pi.ImageID), pi.Image); err != nil {
 				s.events.BroadcastLog(name, "Failed to remove: "+err.Error())
@@ -615,14 +611,9 @@ func (s *Server) handleClearOldImage(w http.ResponseWriter, r *http.Request, nam
 			s.events.BroadcastLog(name, fmt.Sprintf("Removed %d old image(s)", removed))
 		}
 	} else {
-		// Remove a specific image from the list.
 		found := false
 		for i, pi := range prevImages {
 			if pi.Image == req.Image || (req.ImageID != "" && pi.ImageID == req.ImageID) {
-				if pi.Pinned {
-					s.writeError(w, "image is pinned, unpin first", 400)
-					return
-				}
 				s.events.BroadcastLog(name, "Removing old image: "+pi.Image)
 				if err := s.client.RemoveImageByID(ctx, types.ImageID(pi.ImageID), pi.Image); err != nil {
 					s.events.BroadcastLog(name, "Failed to remove: "+err.Error())
@@ -640,26 +631,6 @@ func (s *Server) handleClearOldImage(w http.ResponseWriter, r *http.Request, nam
 		}
 	}
 
-	s.writeJSON(w, map[string]string{"status": "ok"})
-}
-
-func (s *Server) handlePinImage(w http.ResponseWriter, r *http.Request, name string) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, "method not allowed", 405)
-		return
-	}
-	var req struct {
-		Index  int  `json:"index"`
-		Pinned bool `json:"pinned"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, "invalid request body", 400)
-		return
-	}
-	if err := s.state.PinPreviousImage(name, req.Index, req.Pinned); err != nil {
-		s.writeError(w, err.Error(), 500)
-		return
-	}
 	s.writeJSON(w, map[string]string{"status": "ok"})
 }
 
@@ -762,8 +733,8 @@ func (s *Server) handleAPISettings(w http.ResponseWriter, r *http.Request) {
 			s.writeError(w, "invalid request body", 400)
 			return
 		}
-		if settings.ImageRetentionHrs < 0 || settings.ImageRetentionHrs > 10080 {
-			settings.ImageRetentionHrs = 1440
+		if settings.OldImageCount < 0 || settings.OldImageCount > 50 {
+			settings.OldImageCount = 3
 		}
 
 		// Capture old schedule/tz to detect changes.
@@ -1443,15 +1414,10 @@ func (s *Server) BroadcastUpdate(container, status string) {
 	s.events.BroadcastUpdate(container, status)
 }
 
-func (s *Server) purgeExpiredImages() {
+func (s *Server) trimExpiredImages() {
 	ctx := context.Background()
-	removed := s.state.PurgeExpiredImages()
-	seen := make(map[string]bool, len(removed))
+	removed := s.state.TrimPreviousImages()
 	for _, ri := range removed {
-		if seen[ri.ImageID] {
-			continue
-		}
-		seen[ri.ImageID] = true
 		s.events.BroadcastLog(ri.Name, "Auto-purged old image: "+ri.Image)
 		if err := s.client.RemoveImageByID(ctx, types.ImageID(ri.ImageID), ri.Image); err != nil {
 			s.events.BroadcastLog(ri.Name, "Failed to remove old image: "+err.Error())
@@ -1522,19 +1488,17 @@ func (s *Server) handleAPICheckStatus(w http.ResponseWriter, r *http.Request) {
 	s.autoCheckMu.RLock()
 	lastCheck := s.lastAutoCheck
 	nextCheck := s.nextAutoCheck
-	lastPurge := s.lastPurge
 	s.autoCheckMu.RUnlock()
 
 	schedule := s.state.GetSettings().Schedule
-	retentionMin := s.state.GetSettings().ImageRetentionHrs
+	oldImageCount := s.state.GetOldImageCount()
 
 	resp := map[string]interface{}{
-		"last_check":         nil,
-		"next_check":         nil,
-		"schedule":           schedule,
-		"interval_ms":        0,
-		"image_retention_min": retentionMin,
-		"last_purge":         nil,
+		"last_check":      nil,
+		"next_check":      nil,
+		"schedule":        schedule,
+		"interval_ms":     0,
+		"old_image_count": oldImageCount,
 	}
 
 	if !lastCheck.IsZero() {
@@ -1546,9 +1510,6 @@ func (s *Server) handleAPICheckStatus(w http.ResponseWriter, r *http.Request) {
 		if ms > 0 {
 			resp["interval_ms"] = ms
 		}
-	}
-	if !lastPurge.IsZero() {
-		resp["last_purge"] = lastPurge.Format(time.RFC3339)
 	}
 
 	s.writeJSON(w, resp)
