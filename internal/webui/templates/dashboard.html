@@ -85,12 +85,6 @@
                 <p class="text-sm text-gray-500 mt-0.5">Monitor and manage Docker container updates{{if .Version}} &middot; <span class="text-gray-600">{{.Version}}</span>{{end}}</p>
             </div>
             <div class="flex items-center gap-3">
-                <div id="update-progress" class="hidden flex items-center gap-3">
-                    <div class="w-48 h-2 bg-gray-800 rounded-full overflow-hidden">
-                        <div id="update-progress-bar" class="h-full bg-dock-500 rounded-full transition-all duration-300" style="width: 0%"></div>
-                    </div>
-                    <span id="update-eta" class="text-sm text-gray-400 whitespace-nowrap"></span>
-                </div>
                 <button onclick="checkAll()" id="check-btn" class="bg-dock-600 hover:bg-dock-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
                     <span id="check-spinner" class="hidden animate-spin">&#8635;</span>
                     <span>Check All</span>
@@ -173,9 +167,6 @@
         var checked = {};  // Track per-container check state: 'stale'|'ok'|'error'|null
         var expanded = {};
         var containerLogs = {};
-        var updateTotal = 0;
-        var updateDone = 0;
-        var updateStart = null;
         var showDatabases = false;
         var showSidecars = false;
 
@@ -305,6 +296,7 @@
             var logBadge = logCount > 0 ? '<span class="text-xs text-gray-600 ml-2">' + logCount + '</span>' : '';
 
             var html = '<div id="card-' + n + '" class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden' + borderColor + '">'
+                + '<div id="card-progress-' + n + '" class="h-0.5 bg-dock-500 transition-all duration-300 hidden" style="width: 0%"></div>'
                 + '<div class="p-4 cursor-pointer hover:bg-gray-900/50 transition-colors" onclick="toggleDetail(\'' + n + '\')">'
                 + '<div class="flex items-start justify-between">'
                 + '<div class="flex-1 min-w-0">'
@@ -652,12 +644,8 @@
         });
 
         window.triggerUpdate = function(name) {
-            if (updateTotal === 0) {
-                updateTotal = 1;
-                updateDone = 0;
-                updateStart = Date.now();
-                showUpdateProgress();
-            }
+            var bar = document.getElementById('card-progress-' + name);
+            if (bar) { bar.classList.remove('hidden'); bar.style.width = '50%'; }
             containerLogs[name] = [];
             fetch('/api/containers/' + name + '/update', {
                 method: 'POST',
@@ -838,39 +826,6 @@
             if (expanded[name]) renderLogPanel(name);
         }
 
-        function showUpdateProgress() {
-            var container = document.getElementById('update-progress');
-            container.classList.remove('hidden');
-            updateProgress();
-        }
-
-        function updateProgress() {
-            var bar = document.getElementById('update-progress-bar');
-            var etaEl = document.getElementById('update-eta');
-            if (!updateStart || updateTotal === 0) {
-                document.getElementById('update-progress').classList.add('hidden');
-                return;
-            }
-            var pct = Math.round((updateDone / updateTotal) * 100);
-            bar.style.width = pct + '%';
-            if (updateDone >= updateTotal) {
-                bar.className = 'h-full bg-emerald-500 rounded-full transition-all duration-300';
-                etaEl.textContent = 'Done (' + updateTotal + '/' + updateTotal + ')';
-                setTimeout(function() {
-                    document.getElementById('update-progress').classList.add('hidden');
-                    bar.style.width = '0%';
-                    bar.className = 'h-full bg-dock-500 rounded-full transition-all duration-300';
-                }, 5000);
-            } else {
-                var elapsed = (Date.now() - updateStart) / 1000;
-                var perContainer = elapsed / Math.max(updateDone, 1);
-                var remaining = (updateTotal - updateDone) * perContainer;
-                var mins = Math.floor(remaining / 60);
-                var secs = Math.floor(remaining % 60);
-                etaEl.textContent = (mins > 0 ? mins + 'm ' : '') + secs + 's left \u2022 ' + updateDone + '/' + updateTotal;
-            }
-        }
-
         function dataHash(data) {
             return JSON.stringify(data.map(function(c) { return [c.name, c.stale, c.state, c.update_mode, c.is_deferred, c.check_error]; }));
         }
@@ -914,8 +869,10 @@
                 .catch(function() { isLoading = false; });
         }
 
+        var autoUpdateRunning = false;
+
         function autoUpdateStale() {
-            if (updateTotal > 0 && updateDone < updateTotal) return;
+            if (autoUpdateRunning) return;
             var toUpdate = [];
             containers.forEach(function(c) {
                 if (getVisualState(c) === 'stale' && c.update_mode === 'auto' && !c.is_self && !c.is_deferred && !isSidecar(c) && !isDatabase(c)) {
@@ -923,11 +880,9 @@
                 }
             });
             if (toUpdate.length > 0) {
-                updateTotal = toUpdate.length;
-                updateDone = 0;
-                updateStart = Date.now();
-                showUpdateProgress();
+                autoUpdateRunning = true;
                 toUpdate.forEach(function(c) { triggerUpdate(c.name); });
+                setTimeout(function() { autoUpdateRunning = false; }, 30000);
             }
         }
 
@@ -991,16 +946,16 @@
             eventSource.addEventListener('update_complete', function(e) {
                 var data = JSON.parse(e.data);
                 addLog(data.container, 'Update complete');
-                updateDone++;
-                updateProgress();
+                var bar = document.getElementById('card-progress-' + data.container);
+                if (bar) { bar.style.width = '100%'; bar.style.background = 'rgb(16, 185, 129)'; setTimeout(function() { bar.classList.add('hidden'); bar.style.width = '0%'; bar.style.background = ''; }, 2000); }
                 if (!isReplay) refreshContainers(true);
             });
 
             eventSource.addEventListener('update_failed', function(e) {
                 var data = JSON.parse(e.data);
                 addLog(data.container, 'Update failed');
-                updateDone++;
-                updateProgress();
+                var bar = document.getElementById('card-progress-' + data.container);
+                if (bar) { bar.style.width = '100%'; bar.style.background = 'rgb(239, 68, 68)'; setTimeout(function() { bar.classList.add('hidden'); bar.style.width = '0%'; bar.style.background = ''; }, 2000); }
                 if (!isReplay) refreshContainers(true);
             });
 

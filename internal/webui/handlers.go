@@ -297,13 +297,6 @@ func (s *Server) performContainerUpdate(name string) {
 		s.updatingMu.Unlock()
 	}()
 
-	// Guard: skip if container was updated within the cooldown window.
-	if s.state.WasRecentlyUpdated(name, postUpdateCooldown) {
-		s.events.BroadcastLog(name, fmt.Sprintf("Updated recently — skipping (cooldown %s)", postUpdateCooldown))
-		s.events.Broadcast(Event{Type: EventUpdateComplete, Container: name, Message: "Skipped"})
-		return
-	}
-
 	startTime := time.Now()
 	s.events.Broadcast(Event{Type: EventUpdateStarted, Container: name, Message: "Updating", Data: map[string]string{"session_id": sessionID}})
 	s.events.BroadcastLog(name, "Pulling latest image...")
@@ -1111,12 +1104,6 @@ func (s *Server) runAutoCheck(ctx context.Context) {
 				return
 			}
 
-			// Skip containers updated within the cooldown window.
-			if s.state.WasRecentlyUpdated(containers[i].Name, postUpdateCooldown) {
-				results <- result{index: i} // treat as up-to-date
-				return
-			}
-
 			dc, ok := dockerByName[containers[i].Name]
 			if !ok {
 				results <- result{index: i, err: "not found in Docker"}
@@ -1232,9 +1219,6 @@ func (s *Server) runAutoCheck(ctx context.Context) {
 		updating := s.updating[d.name]
 		s.updatingMu.Unlock()
 		if updating {
-			continue
-		}
-		if s.state.WasRecentlyUpdated(d.name, postUpdateCooldown) {
 			continue
 		}
 		logrus.WithField("container", d.name).Info("Auto-check: triggering auto-update")

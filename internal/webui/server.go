@@ -48,13 +48,6 @@ type Server struct {
 	scheduleChanged  chan struct{} // signals the cron goroutine to re-evaluate
 }
 
-// postUpdateCooldown is the minimum time between a successful update and the
-// next auto-check staleness evaluation for the same container. This prevents
-// the auto-check from immediately re-detecting a container as stale right
-// after it was updated (which can happen when digest comparisons or image
-// inspections race with Docker's internal state propagation).
-const postUpdateCooldown = 5 * time.Minute
-
 type ContainerInfo struct {
 	Name             string            `json:"name"`
 	Image            string            `json:"image"`
