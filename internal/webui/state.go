@@ -21,22 +21,26 @@ const (
 	ModeIgnore  UpdateMode = "ignore"
 )
 
+type PreviousImageEntry struct {
+	Image     string    `json:"image"`
+	ImageID   string    `json:"image_id"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
 type ContainerState struct {
-	UpdateMode             UpdateMode `json:"update_mode"`
-	DeferUntil             *time.Time `json:"defer_until,omitempty"`
-	ChangelogURL           string     `json:"changelog_url,omitempty"`
-	LastUpdated            *time.Time `json:"last_updated,omitempty"`
-	PreviousImage          string     `json:"previous_image,omitempty"`
-	PreviousImageID        string     `json:"previous_image_id,omitempty"`
-	PreviousImageCleanupAt *time.Time `json:"previous_image_cleanup_at,omitempty"`
-	CheckError             string     `json:"check_error,omitempty"`
-	IsStale                bool       `json:"is_stale,omitempty"`
-	CheckedAt              *time.Time `json:"checked_at,omitempty"`
-	LatestImage            string     `json:"latest_image,omitempty"`
-	LatestVersion          string     `json:"latest_version,omitempty"`
-	UpdateDetectedAt       *time.Time `json:"update_detected_at,omitempty"`
-	LastMentionAt          *time.Time `json:"last_mention_at,omitempty"`
-	RoleOverride           string     `json:"role_override,omitempty"` // "sidecar", "database", or "" for auto-detect
+	UpdateMode       UpdateMode          `json:"update_mode"`
+	DeferUntil       *time.Time          `json:"defer_until,omitempty"`
+	ChangelogURL     string              `json:"changelog_url,omitempty"`
+	LastUpdated      *time.Time          `json:"last_updated,omitempty"`
+	PreviousImages   []PreviousImageEntry `json:"previous_images,omitempty"`
+	CheckError       string              `json:"check_error,omitempty"`
+	IsStale          bool                `json:"is_stale,omitempty"`
+	CheckedAt        *time.Time          `json:"checked_at,omitempty"`
+	LatestImage      string              `json:"latest_image,omitempty"`
+	LatestVersion    string              `json:"latest_version,omitempty"`
+	UpdateDetectedAt *time.Time          `json:"update_detected_at,omitempty"`
+	LastMentionAt    *time.Time          `json:"last_mention_at,omitempty"`
+	RoleOverride     string              `json:"role_override,omitempty"`
 }
 
 type Settings struct {
@@ -52,7 +56,6 @@ type Settings struct {
 	LifecycleHooks    bool   `json:"lifecycle_hooks"`
 	NotificationURL   string `json:"notification_url"`
 	UpdateOnStart     bool   `json:"update_on_start"`
-	ImageRetentionHrs int    `json:"image_retention_hrs"`
 }
 
 type HistoryEntry struct {
@@ -303,15 +306,6 @@ func (s *State) getSettingsLocked() Settings {
 	return s.Settings
 }
 
-// ImageRetentionHours returns the retention duration from the setting.
-// Defaults to 24 hours if not set.
-func (set Settings) ImageRetentionHours() time.Duration {
-	if set.ImageRetentionHrs <= 0 {
-		return 24 * time.Hour
-	}
-	return time.Duration(set.ImageRetentionHrs) * time.Hour
-}
-
 func (s *State) AddHistory(entry HistoryEntry) error {
 	s.mu.Lock()
 	s.History = append([]HistoryEntry{entry}, s.History...)
@@ -395,99 +389,44 @@ func (s *State) SavePreviousImage(name, image, imageID string) error {
 		cs = &ContainerState{UpdateMode: ModeManual}
 		s.Containers[name] = cs
 	}
-	cs.PreviousImage = image
-	cs.PreviousImageID = imageID
+	cs.PreviousImages = append([]PreviousImageEntry{{
+		Image:     image,
+		ImageID:   imageID,
+		Timestamp: time.Now(),
+	}}, cs.PreviousImages...)
+	if len(cs.PreviousImages) > 10 {
+		cs.PreviousImages = cs.PreviousImages[:10]
+	}
 	s.mu.Unlock()
 	return s.save()
 }
 
-func (s *State) GetPreviousImage(name string) (string, string, bool) {
+func (s *State) GetPreviousImages(name string) []PreviousImageEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	cs, ok := s.Containers[name]
-	if !ok || cs.PreviousImage == "" {
-		return "", "", false
-	}
-	return cs.PreviousImage, cs.PreviousImageID, true
-}
-
-func (s *State) ClearPreviousImage(name string) error {
-	s.mu.Lock()
-	if cs, ok := s.Containers[name]; ok {
-		cs.PreviousImage = ""
-		cs.PreviousImageID = ""
-		cs.PreviousImageCleanupAt = nil
-	}
-	s.mu.Unlock()
-	return s.save()
-}
-
-// GetImageRetention returns the configured image retention duration.
-// Defaults to 24 hours if not set.
-func (s *State) GetImageRetention() time.Duration {
-	s.mu.RLock()
-	hours := s.Settings.ImageRetentionHrs
-	s.mu.RUnlock()
-	if hours <= 0 {
-		return 24 * time.Hour
-	}
-	return time.Duration(hours) * time.Hour
-}
-
-// ScheduleImageCleanup marks a container's old image for deferred cleanup.
-func (s *State) ScheduleImageCleanup(name, imageID, imageName string) error {
-	s.mu.Lock()
 	cs, ok := s.Containers[name]
 	if !ok {
-		cs = &ContainerState{UpdateMode: ModeManual}
-		s.Containers[name] = cs
+		return nil
 	}
-	cs.PreviousImage = imageName
-	cs.PreviousImageID = imageID
-	retention := s.getSettingsLocked().ImageRetentionHours()
-	cleanupAt := time.Now().Add(retention)
-	cs.PreviousImageCleanupAt = &cleanupAt
-	s.mu.Unlock()
-	return s.save()
+	return cs.PreviousImages
 }
 
-// GetExpiredImageCleanups returns containers whose old images have passed retention.
-func (s *State) GetExpiredImageCleanups() []ExpiredImage {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	now := time.Now()
-	var expired []ExpiredImage
-	for name, cs := range s.Containers {
-		if cs.PreviousImageID != "" && cs.PreviousImageCleanupAt != nil && now.After(*cs.PreviousImageCleanupAt) {
-			expired = append(expired, ExpiredImage{
-				Name:     name,
-				ImageID:  cs.PreviousImageID,
-				Image:    cs.PreviousImage,
-				SavedAt:  *cs.PreviousImageCleanupAt,
-			})
-		}
-	}
-	return expired
-}
-
-// ConsumeImageCleanup clears the cleanup tracking for a container after
-// its old image has been removed.
-func (s *State) ConsumeImageCleanup(name string) error {
+func (s *State) ClearPreviousImages(name string) error {
 	s.mu.Lock()
 	if cs, ok := s.Containers[name]; ok {
-		cs.PreviousImage = ""
-		cs.PreviousImageID = ""
-		cs.PreviousImageCleanupAt = nil
+		cs.PreviousImages = nil
 	}
 	s.mu.Unlock()
 	return s.save()
 }
 
-type ExpiredImage struct {
-	Name    string
-	ImageID string
-	Image   string
-	SavedAt time.Time
+func (s *State) RemovePreviousImage(name string, index int) error {
+	s.mu.Lock()
+	if cs, ok := s.Containers[name]; ok && index >= 0 && index < len(cs.PreviousImages) {
+		cs.PreviousImages = append(cs.PreviousImages[:index], cs.PreviousImages[index+1:]...)
+	}
+	s.mu.Unlock()
+	return s.save()
 }
 
 func (s *State) SaveCheckResult(name string, isStale bool, checkErr string, latestImage string) error {

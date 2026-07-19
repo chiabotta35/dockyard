@@ -73,15 +73,26 @@
                     </div>
                     <span id="update-eta" class="text-sm text-gray-400 whitespace-nowrap"></span>
                 </div>
-                <button id="self-update-btn" onclick="selfUpdate()" class="hidden bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors items-center gap-2">
-                    <span>&#8635;</span>
-                    <span id="self-update-text">Update Dockyard</span>
-                </button>
-                <a id="self-update-release" href="#" target="_blank" rel="noopener" class="hidden text-xs text-dock-400 hover:text-dock-300 border border-dock-500/30 px-3 py-2 rounded-lg">Release Notes &#8599;</a>
                 <button onclick="checkAll()" id="check-btn" class="bg-dock-600 hover:bg-dock-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
                     <span id="check-spinner" class="hidden animate-spin">&#8635;</span>
                     <span>Check Now</span>
                 </button>
+            </div>
+        </div>
+
+        <div id="self-update-banner" class="hidden mb-6 bg-dock-900/40 border border-dock-500/40 rounded-xl p-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <span class="text-dock-400 text-lg">&#8635;</span>
+                    <div>
+                        <div class="text-sm font-medium text-white">Dockyard update available: <span id="banner-update-version" class="text-dock-400"></span></div>
+                        <div id="banner-release-link" class="hidden"><a href="#" target="_blank" rel="noopener" class="text-xs text-dock-400 hover:text-dock-300">Release Notes &#8599;</a></div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="selfUpdate()" id="banner-update-btn" class="bg-dock-600 hover:bg-dock-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors">Update Now</button>
+                    <button onclick="document.getElementById('self-update-banner').classList.add('hidden')" class="text-gray-500 hover:text-gray-300 px-2 py-1.5 text-sm" title="Dismiss">&times;</button>
+                </div>
             </div>
         </div>
 
@@ -281,16 +292,8 @@
             if (c.update_mode !== 'ignore') {
                 actionBtns += '<button onclick="event.stopPropagation(); checkSingle(\'' + n + '\')" id="check-btn-' + n + '" class="bg-gray-700 hover:bg-gray-600 text-white px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" title="Check for updates">Check</button>';
             }
-            if (vs === 'stale') {
-                if (c.is_self) {
-                    actionBtns += '<button onclick="event.stopPropagation(); triggerUpdate(\'' + n + '\')" class="bg-dock-600 hover:bg-dock-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors" title="Updates Dockyard itself">Update Dockyard</button>';
-                } else if (c.update_mode !== 'ignore') {
-                    actionBtns += '<button onclick="event.stopPropagation(); triggerUpdate(\'' + n + '\')" class="bg-dock-600 hover:bg-dock-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">Update</button>';
-                }
-            }
-            if (c.has_previous_image) {
-                actionBtns += '<button onclick="event.stopPropagation(); rollbackContainer(\'' + n + '\')" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors" title="Rollback">Rollback</button>';
-                actionBtns += '<button onclick="event.stopPropagation(); clearOldImage(\'' + n + '\')" class="bg-gray-800 hover:bg-gray-700 text-gray-400 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors" title="Remove old image, rollback will no longer be available">Discard</button>';
+            if (vs === 'stale' && !c.is_self && c.update_mode !== 'ignore') {
+                actionBtns += '<button onclick="event.stopPropagation(); triggerUpdate(\'' + n + '\')" class="bg-dock-600 hover:bg-dock-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">Update</button>';
             }
 
 
@@ -306,6 +309,7 @@
                 + '<div class="w-2.5 h-2.5 rounded-full ' + statusDot + '"></div>'
                 + '<h3 class="font-semibold text-white truncate">' + n + '</h3>'
                 + (c.is_self ? '<span class="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full">Self</span>' : '')
+                + (c.previous_images && c.previous_images.length > 0 ? '<span class="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full" title="' + c.previous_images.length + ' old image(s) available">' + c.previous_images.length + ' old</span>' : '')
                 + versionBadge + statusBadge + stackBadge + deferBadge + logBadge
                 + '</div>'
                 + '<p class="text-xs text-gray-500 font-mono truncate ml-7 mb-1">' + esc(c.image) + '</p>'
@@ -335,7 +339,7 @@
                 + (vs === 'ok' ? '<div class="col-span-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-2"><div class="text-xs text-emerald-400">Image is up to date</div></div>' : '')
                 + (c.stale ? '<div class="col-span-2 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2"><div class="text-xs text-amber-400">Update available</div>' + (c.current_version && c.latest_version && c.latest_version !== c.current_version ? '<div class="text-sm font-mono text-amber-300 mt-1">' + esc(c.current_version) + ' &#8594; ' + esc(c.latest_version) + '</div>' : c.latest_image ? '<div class="text-xs text-gray-400 mt-1 font-mono">' + esc(c.latest_image) + '</div>' : '') + (c.changelog_url ? '<a href="' + esc(c.changelog_url) + '" target="_blank" rel="noopener" class="text-xs text-dock-400 hover:text-dock-300 mt-1 inline-block" onclick="event.stopPropagation()">Release Notes &#8599;</a>' : '') + '</div>' : '')
                 + (c.checked_at ? '<div><div class="text-xs text-gray-500">Last Checked</div><div class="text-sm text-gray-300">' + new Date(c.checked_at).toLocaleString() + '</div></div>' : '')
-                + (c.has_previous_image ? '<div class="col-span-2"><div class="text-xs text-gray-500">Previous Image</div><div class="text-sm font-mono text-amber-400">' + esc(c.previous_image) + '</div></div>' : '')
+                + (c.previous_images && c.previous_images.length > 0 ? '<div class="col-span-2"><div class="text-xs text-gray-500">Previous Images</div>' + c.previous_images.map(function(pi) { return '<div class="text-sm font-mono text-amber-400 truncate" title="' + esc(pi.image) + ' (' + (pi.timestamp ? new Date(pi.timestamp).toLocaleString() : '') + ')">' + esc(pi.image.length > 60 ? pi.image.substring(0, 57) + '...' : pi.image) + '</div>'; }).join('') + '</div>' : '')
                 + (c.is_self ? '<div class="col-span-2 bg-blue-500/10 border border-blue-500/30 rounded-lg p-2"><div class="text-xs text-blue-400">This is Dockyard. Updating starts a replacement first, then stops this one.</div></div>' : '')
                 + '</div>'
                 + '<div class="flex items-center gap-3">'
@@ -358,6 +362,18 @@
                             + '<button onclick="deferContainer(\'' + n + '\', 14)" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-2 py-1 rounded">14d</button>'
                             + '<button onclick="deferContainer(\'' + n + '\', 30)" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-2 py-1 rounded">30d</button>'
                             + '</div>'
+                ) : '')
+                + (c.previous_images && c.previous_images.length > 0 ? (
+                    '<div class="flex items-center gap-2 mt-2">'
+                    + '<select id="rollback-sel-' + n + '" class="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg px-2 py-1 flex-1" title="Select version to rollback">'
+                    + c.previous_images.map(function(pi, idx) {
+                        var imgShort = esc(pi.image.length > 50 ? pi.image.substring(0, 47) + '...' : pi.image);
+                        return '<option value="' + idx + '">' + imgShort + '</option>';
+                    }).join('')
+                    + '</select>'
+                    + '<button onclick="rollbackContainerVersion(\'' + n + '\')" class="bg-amber-600 hover:bg-amber-700 text-white px-2 py-1 rounded-lg text-xs font-medium">Rollback</button>'
+                    + '<button onclick="clearOldImage(\'' + n + '\', -1)" class="bg-gray-800 hover:bg-gray-700 text-gray-400 px-2 py-1 rounded-lg text-xs font-medium" title="Discard all old images">Discard</button>'
+                    + '</div>'
                 ) : '')
                 + '</div>'
                 + '<div class="bg-gray-950 border border-gray-800 rounded-lg overflow-hidden">'
@@ -678,14 +694,19 @@
             });
         };
 
-        window.rollbackContainer = function(name) {
-            if (!confirm('Rollback ' + name + '?')) return;
+        window.rollbackContainerVersion = function(name) {
+            var sel = document.getElementById('rollback-sel-' + name);
+            var idx = sel ? parseInt(sel.value) : 0;
+            var c = containers.find(function(x) { return x.name === name; });
+            var target = (c && c.previous_images && c.previous_images[idx]) ? c.previous_images[idx].image : 'unknown';
+            if (!confirm('Rollback ' + name + ' to:\n' + target + '?')) return;
             fetch('/api/containers/' + name + '/rollback', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'}
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({index: idx})
             }).then(function(r) { return r.json(); }).then(function(data) {
                 if (!containerLogs[name]) containerLogs[name] = [];
-                containerLogs[name].push({time: new Date().toLocaleTimeString(), msg: 'Rolling back to: ' + (data.target_image || 'previous')});
+                containerLogs[name].push({time: new Date().toLocaleTimeString(), msg: 'Rolling back to: ' + (data.target_image || 'selected version')});
                 renderLogPanel(name);
                 expanded[name] = true;
                 var el = document.getElementById('detail-' + name);
@@ -695,11 +716,16 @@
             });
         };
 
-        window.clearOldImage = function(name) {
-            if (!confirm('Remove old image for ' + name + '? Rollback will no longer be available.')) return;
+        window.clearOldImage = function(name, index) {
+            var body = {};
+            if (typeof index === 'number' && index >= 0) {
+                body.index = index;
+            }
+            if (!confirm('Remove old image(s) for ' + name + '? Rollback will no longer be available.')) return;
             fetch('/api/containers/' + name + '/clear-image', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'}
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
             }).then(function() { refreshContainers(); });
         };
 
@@ -784,9 +810,8 @@
 
         window.selfUpdate = function() {
             if (!confirm('Update Dockyard? Container will restart.')) return;
-            var btn = document.getElementById('self-update-btn');
-            btn.disabled = true;
-            document.getElementById('self-update-text').textContent = 'Updating...';
+            var btn = document.getElementById('banner-update-btn');
+            if (btn) { btn.disabled = true; btn.textContent = 'Updating...'; }
             fetch('/api/update/self', { method: 'POST' }).then(function() {}).catch(function() {});
         };
 
@@ -1072,15 +1097,13 @@
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (data.available) {
-                        var btn = document.getElementById('self-update-btn');
-                        btn.classList.remove('hidden');
-                        document.getElementById('self-update-text').textContent = 'Update to ' + esc(data.latest_version);
-                        btn.title = data.body ? data.body.substring(0, 200) : 'Update available';
+                        var banner = document.getElementById('self-update-banner');
+                        banner.classList.remove('hidden');
+                        document.getElementById('banner-update-version').textContent = esc(data.latest_version);
                         if (data.release_url) {
-                            btn.title = data.release_url;
-                            var link = document.getElementById('self-update-release');
+                            var link = document.getElementById('banner-release-link');
                             if (link) {
-                                link.href = data.release_url;
+                                link.querySelector('a').href = data.release_url;
                                 link.classList.remove('hidden');
                             }
                         }

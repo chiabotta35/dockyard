@@ -69,10 +69,10 @@ type ContainerInfo struct {
 	ChangelogURL     string            `json:"changelog_url,omitempty"`
 	Labels           map[string]string `json:"labels"`
 	Created          string            `json:"created"`
-	ImageID          string            `json:"image_id"`
-	HasPreviousImage bool              `json:"has_previous_image"`
-	PreviousImage    string            `json:"previous_image,omitempty"`
-	IsSelf           bool              `json:"is_self"`
+	ImageID          string              `json:"image_id"`
+	HasPreviousImage bool                `json:"has_previous_image"`
+	PreviousImages   []PreviousImageEntry `json:"previous_images,omitempty"`
+	IsSelf           bool                `json:"is_self"`
 	CheckError       string            `json:"check_error,omitempty"`
 	IsDatabase       bool              `json:"is_database"`
 	IsSidecar        bool              `json:"is_sidecar"`
@@ -530,21 +530,6 @@ func (s *Server) Start(ctx context.Context) error {
 
 	logrus.WithField("addr", s.addr).Info("Dockyard web UI starting")
 
-	// Background goroutine: clean up expired old images (kept for rollback).
-	go func() {
-		time.Sleep(30 * time.Second) // let startup settle
-		ticker := time.NewTicker(10 * time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				s.cleanupExpiredImages(ctx)
-			}
-		}
-	}()
-
 	// Auto-check on startup after a short delay (gives containers time to register).
 	go func() {
 		time.Sleep(10 * time.Second)
@@ -816,9 +801,9 @@ func (s *Server) buildContainerList(containers []types.Container) []ContainerInf
 				ci.CheckedAt = cs.CheckedAt.Format(time.RFC3339)
 			}
 
-			if cs.PreviousImage != "" {
+			if len(cs.PreviousImages) > 0 {
 				ci.HasPreviousImage = true
-				ci.PreviousImage = cs.PreviousImage
+				ci.PreviousImages = cs.PreviousImages
 			}
 
 			if cs.DeferUntil != nil {

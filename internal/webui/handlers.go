@@ -269,9 +269,9 @@ func (s *Server) performSelfUpdate(ctx context.Context, name string, target type
 		SessionID: sessionID,
 	})
 
-	// Schedule old image cleanup.
+	// Save old image for rollback.
 	if oldImageID != "" {
-		s.state.ScheduleImageCleanup(name, string(oldImageID), oldImageName)
+		s.state.SavePreviousImage(name, oldImageName, string(oldImageID))
 	}
 }
 
@@ -447,47 +447,42 @@ func (s *Server) performContainerUpdate(name string) {
 		SessionID: sessionID,
 	})
 
-	// Schedule old image cleanup instead of deleting immediately.
-	// The old image is kept for rollback until the retention period expires.
+	// Save old image for rollback.
 	if oldImageID != "" && newImage != oldImageID {
-		s.state.ScheduleImageCleanup(name, string(oldImageID), imageName)
-		s.events.BroadcastLog(name, fmt.Sprintf("Old image kept for rollback (expires in %s)", s.state.GetImageRetention()))
+		s.state.SavePreviousImage(name, imageName, string(oldImageID))
+		s.events.BroadcastLog(name, "Old image saved for rollback")
 	}
 }
 
-// cleanupExpiredImages removes old images that have exceeded the retention period.
-func (s *Server) cleanupExpiredImages(ctx context.Context) {
-	expired := s.state.GetExpiredImageCleanups()
-	if len(expired) == 0 {
-		return
-	}
-	logrus.WithField("count", len(expired)).Info("Cleaning up expired rollback images")
-	for _, img := range expired {
-		s.events.BroadcastLog(img.Name, "Rollback retention expired, cleaning up old image...")
-		if err := s.client.RemoveImageByID(ctx, types.ImageID(img.ImageID), img.Image); err != nil {
-			logrus.WithError(err).WithField("container", img.Name).Warn("Failed to clean up expired image")
-			s.events.BroadcastLog(img.Name, "Image cleanup failed: "+err.Error())
-		} else {
-			logrus.WithField("container", img.Name).Info("Expired rollback image cleaned up")
-			s.events.BroadcastLog(img.Name, "Old image cleaned up (retention expired)")
-		}
-		if err := s.state.ConsumeImageCleanup(img.Name); err != nil {
-			logrus.WithError(err).WithField("container", img.Name).Warn("Failed to clear cleanup tracking")
-		}
-	}
-}
-
-// handleRollbackContainer reverts a container to its previous image.
+// handleRollbackContainer reverts a container to a specific previous image.
+// Accepts POST with body {"image": "...", "image_id": "..."} or falls back to most recent.
 func (s *Server) handleRollbackContainer(w http.ResponseWriter, r *http.Request, name string) {
 	if r.Method != http.MethodPost {
 		s.writeError(w, "method not allowed", 405)
 		return
 	}
 
-	prevImage, _, hasPrevious := s.state.GetPreviousImage(name)
-	if !hasPrevious {
+	var req struct {
+		Image   string `json:"image"`
+		ImageID string `json:"image_id"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	prevImages := s.state.GetPreviousImages(name)
+	if len(prevImages) == 0 {
 		s.writeError(w, "no previous image recorded — cannot rollback", 400)
 		return
+	}
+
+	// Find the requested image or fall back to the most recent.
+	prevImage := prevImages[0].Image
+	if req.Image != "" {
+		for _, pi := range prevImages {
+			if pi.Image == req.Image {
+				prevImage = pi.Image
+				break
+			}
+		}
 	}
 
 	s.events.BroadcastLog(name, "Rolling back to: "+prevImage)
@@ -554,7 +549,7 @@ func (s *Server) handleRollbackContainer(w http.ResponseWriter, r *http.Request,
 		if isSelf {
 			elapsed := time.Since(startTime).Truncate(time.Millisecond)
 			s.events.BroadcastLog(name, fmt.Sprintf("Self-rollback complete (%s) — container is restarting", elapsed))
-			s.state.ClearPreviousImage(name)
+			s.state.ClearPreviousImages(name)
 			s.state.AddHistory(HistoryEntry{
 				Container: name,
 				Timestamp: time.Now(),
@@ -574,7 +569,7 @@ func (s *Server) handleRollbackContainer(w http.ResponseWriter, r *http.Request,
 		elapsed := time.Since(startTime).Truncate(time.Millisecond)
 		s.events.BroadcastLog(name, fmt.Sprintf("Rollback complete (%s)", elapsed))
 		s.events.Broadcast(Event{Type: EventUpdateComplete, Container: name, Message: "Rolled back"})
-		s.state.ClearPreviousImage(name)
+		s.state.ClearPreviousImages(name)
 		s.state.AddHistory(HistoryEntry{
 			Container: name,
 			Timestamp: time.Now(),
@@ -593,23 +588,53 @@ func (s *Server) handleClearOldImage(w http.ResponseWriter, r *http.Request, nam
 		return
 	}
 
-	prevImage, prevImageID, hasPrevious := s.state.GetPreviousImage(name)
-	if !hasPrevious {
-		s.writeError(w, "no previous image to remove", 400)
+	var req struct {
+		Image   string `json:"image"`
+		ImageID string `json:"image_id"`
+		All     bool   `json:"all"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	prevImages := s.state.GetPreviousImages(name)
+	if len(prevImages) == 0 {
+		s.writeError(w, "no previous images to remove", 400)
 		return
 	}
 
 	ctx := context.Background()
-	s.events.BroadcastLog(name, "Removing old image: "+prevImage)
 
-	if err := s.client.RemoveImageByID(ctx, types.ImageID(prevImageID), prevImage); err != nil {
-		s.events.BroadcastLog(name, "Failed to remove old image: "+err.Error())
-		s.writeError(w, err.Error(), 500)
-		return
+	if req.All {
+		// Remove all previous images.
+		for _, pi := range prevImages {
+			s.events.BroadcastLog(name, "Removing old image: "+pi.Image)
+			if err := s.client.RemoveImageByID(ctx, types.ImageID(pi.ImageID), pi.Image); err != nil {
+				s.events.BroadcastLog(name, "Failed to remove: "+err.Error())
+			}
+		}
+		s.state.ClearPreviousImages(name)
+		s.events.BroadcastLog(name, "All old images removed — rollback no longer available")
+	} else {
+		// Remove a specific image from the list.
+		removed := false
+		for i, pi := range prevImages {
+			if pi.Image == req.Image || (req.ImageID != "" && pi.ImageID == req.ImageID) {
+				s.events.BroadcastLog(name, "Removing old image: "+pi.Image)
+				if err := s.client.RemoveImageByID(ctx, types.ImageID(pi.ImageID), pi.Image); err != nil {
+					s.events.BroadcastLog(name, "Failed to remove: "+err.Error())
+					s.writeError(w, err.Error(), 500)
+					return
+				}
+				s.state.RemovePreviousImage(name, i)
+				removed = true
+				break
+			}
+		}
+		if !removed {
+			s.writeError(w, "image not found in previous images", 400)
+			return
+		}
 	}
 
-	s.state.ClearPreviousImage(name)
-	s.events.BroadcastLog(name, "Old image removed — rollback no longer available")
 	s.writeJSON(w, map[string]string{"status": "ok"})
 }
 
@@ -714,9 +739,6 @@ func (s *Server) handleAPISettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if settings.BackupWindowHours < 1 || settings.BackupWindowHours > 720 {
 			settings.BackupWindowHours = 24
-		}
-		if settings.ImageRetentionHrs < 0 || settings.ImageRetentionHrs > 720 {
-			settings.ImageRetentionHrs = 24
 		}
 
 		// Capture old schedule/tz to detect changes.
