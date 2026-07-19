@@ -914,76 +914,99 @@
         }
 
         // --- SSE ---
-        var eventSource = new EventSource('/api/events');
+        var eventSource = null;
         var sseReconnects = 0;
-
         var isReplay = false;
+        var sseRetryTimer = null;
+        var sseHealthy = false;
 
-        eventSource.onopen = function() {
-            // Every SSE connect replays history events — ignore them briefly.
-            isReplay = true;
-            setTimeout(function() { isReplay = false; }, 2000);
-            sseReconnects++;
-            if (sseReconnects > 1) {
-                var overlay = document.getElementById('restart-overlay');
-                if (!overlay.classList.contains('hidden')) {
-                    document.getElementById('restart-msg').innerHTML = 'Update complete!';
-                    document.getElementById('restart-countdown').textContent = '';
-                    document.getElementById('restart-progress-bar').style.width = '0%';
-                    setTimeout(function() { overlay.classList.add('hidden'); }, 2000);
-                }
-                refreshContainers(true);
+        function connectSSE() {
+            if (eventSource) {
+                try { eventSource.close(); } catch(e) {}
             }
-        };
+            eventSource = new EventSource('/api/events');
+            sseHealthy = true;
 
-        eventSource.onerror = function() {
-            console.warn('SSE connection lost, reconnecting...');
-        };
+            eventSource.onopen = function() {
+                sseHealthy = true;
+                isReplay = true;
+                setTimeout(function() { isReplay = false; }, 2000);
+                sseReconnects++;
+                if (sseReconnects > 1) {
+                    var overlay = document.getElementById('restart-overlay');
+                    if (!overlay.classList.contains('hidden')) {
+                        document.getElementById('restart-msg').innerHTML = 'Update complete!';
+                        document.getElementById('restart-countdown').textContent = '';
+                        document.getElementById('restart-progress-bar').style.width = '0%';
+                        setTimeout(function() { overlay.classList.add('hidden'); }, 2000);
+                    }
+                    refreshContainers(true);
+                    // Retry refresh after a few seconds in case server isn't ready yet
+                    setTimeout(function() { refreshContainers(true); }, 3000);
+                    setTimeout(function() { refreshContainers(true); }, 8000);
+                }
+                if (sseRetryTimer) { clearInterval(sseRetryTimer); sseRetryTimer = null; }
+            };
 
-        eventSource.addEventListener('log_line', function(e) {
-            var data = JSON.parse(e.data);
-            addLog(data.container, data.message);
-        });
+            eventSource.onerror = function() {
+                sseHealthy = false;
+                console.warn('SSE connection lost, reconnecting...');
+                try { eventSource.close(); } catch(e) {}
+                if (!sseRetryTimer) {
+                    sseRetryTimer = setInterval(function() {
+                        console.log('SSE: attempting reconnect...');
+                        connectSSE();
+                    }, 5000);
+                }
+            };
 
-        eventSource.addEventListener('update_started', function(e) {
-            var data = JSON.parse(e.data);
-            addLog(data.container, 'Update started');
-        });
+            eventSource.addEventListener('log_line', function(e) {
+                var data = JSON.parse(e.data);
+                addLog(data.container, data.message);
+            });
 
-        eventSource.addEventListener('update_complete', function(e) {
-            var data = JSON.parse(e.data);
-            addLog(data.container, 'Update complete');
-            updateDone++;
-            updateProgress();
-            if (!isReplay) refreshContainers(true);
-        });
+            eventSource.addEventListener('update_started', function(e) {
+                var data = JSON.parse(e.data);
+                addLog(data.container, 'Update started');
+            });
 
-        eventSource.addEventListener('update_failed', function(e) {
-            var data = JSON.parse(e.data);
-            addLog(data.container, 'Update failed');
-            updateDone++;
-            updateProgress();
-            if (!isReplay) refreshContainers(true);
-        });
+            eventSource.addEventListener('update_complete', function(e) {
+                var data = JSON.parse(e.data);
+                addLog(data.container, 'Update complete');
+                updateDone++;
+                updateProgress();
+                if (!isReplay) refreshContainers(true);
+            });
 
-        eventSource.addEventListener('scan_started', function(e) {
-            if (isReplay) return;
-            document.getElementById('check-btn').disabled = true;
-            document.getElementById('check-spinner').classList.remove('hidden');
-            document.getElementById('scan-banner').classList.add('hidden');
-        });
+            eventSource.addEventListener('update_failed', function(e) {
+                var data = JSON.parse(e.data);
+                addLog(data.container, 'Update failed');
+                updateDone++;
+                updateProgress();
+                if (!isReplay) refreshContainers(true);
+            });
 
-        eventSource.addEventListener('scan_complete', function(e) {
-            document.getElementById('check-btn').disabled = false;
-            document.getElementById('check-spinner').classList.add('hidden');
-            if (!isReplay) refreshContainers(true);
-        });
+            eventSource.addEventListener('scan_started', function(e) {
+                if (isReplay) return;
+                document.getElementById('check-btn').disabled = true;
+                document.getElementById('check-spinner').classList.remove('hidden');
+                document.getElementById('scan-banner').classList.add('hidden');
+            });
 
-        eventSource.addEventListener('self_update', function(e) {
-            if (isReplay) return;
-            var data = JSON.parse(e.data);
-            showRestartBanner(data.message || 'Updating...');
-        });
+            eventSource.addEventListener('scan_complete', function(e) {
+                document.getElementById('check-btn').disabled = false;
+                document.getElementById('check-spinner').classList.add('hidden');
+                if (!isReplay) refreshContainers(true);
+            });
+
+            eventSource.addEventListener('self_update', function(e) {
+                if (isReplay) return;
+                var data = JSON.parse(e.data);
+                showRestartBanner(data.message || 'Updating...');
+            });
+        }
+
+        connectSSE();
 
         var restartBannerShown = false;
         function showRestartBanner(msg) {
@@ -1003,6 +1026,12 @@
                     el.textContent = '0';
                     bar.style.width = '0%';
                     document.getElementById('restart-msg').innerHTML = 'Restarting now&hellip;';
+                    // Safety: if SSE hasn't reconnected after 20s, force reload
+                    setTimeout(function() {
+                        if (overlay && !overlay.classList.contains('hidden')) {
+                            window.location.reload();
+                        }
+                    }, 20000);
                     return;
                 }
                 el.textContent = countdown;
